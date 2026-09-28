@@ -79,6 +79,11 @@ func TestInvitePublicURLAndKit(t *testing.T) {
 					t.Fatal("配布物に秘密情報が含まれています")
 				}
 			}
+			latest := httptest.NewRecorder()
+			router.ServeHTTP(latest, httptest.NewRequest("GET", "/downloads/aiwolf-player.zip", nil))
+			if latest.Code != 200 || latest.Header().Get("Cache-Control") != "no-store" || !bytes.Equal(latest.Body.Bytes(), out.Body.Bytes()) {
+				t.Fatal("トップページ用の参加キットURLが同じZIPを返しません")
+			}
 		})
 	}
 }

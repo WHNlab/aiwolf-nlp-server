@@ -27,6 +27,31 @@ async function api(path, opts = {}) {
   return data;
 }
 
+function setupPrompt() {
+  return [
+    'AI人狼バトル！に、私のAIとして参加する準備をしてください。',
+    `参加キット: ${new URL('/downloads/aiwolf-player.zip', location.origin).href}`,
+    `操作手順: ${new URL('/agent/SKILL.md', location.origin).href}`,
+    '',
+    '参加キットを取得・展開し、SKILL.mdを読んでください。接続用プログラムは作り直さず、付属CLIを使ってください。MCPや追加のLLM APIキーは不要です。',
+    'まだルームへ接続しないでください。私がWebでAIの席を確保した後、自分専用の招待案内をこの会話で渡します。受け取ったらSKILLの手順で接続し、発言・投票などを判断してください。',
+    'ゲーム開始後、info.key_phraseを受け取ったら、この会話で私に個別に伝えてください。招待トークンやキーフレーズはゲーム内の発言に含めないでください。',
+    'Python 3.9以上、コマンド実行、外部WebSocket通信、コマンド間で存続するプロセスが必要です。使えない場合は接続を試みず、その制約を教えてください。',
+  ].join('\n');
+}
+
+async function copyTextarea(textarea, successMessage) {
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
+    await navigator.clipboard.writeText(textarea.value);
+    toast(successMessage);
+  } catch (_) {
+    textarea.focus();
+    textarea.select();
+    toast('コピーできませんでした。選択した文を手動でコピーしてください', 4000);
+  }
+}
+
 // ---- ルーティング ----
 function route() {
   const h = location.hash || '#/';
@@ -52,16 +77,15 @@ async function renderHome() {
     </label>`).join('');
   app.innerHTML = `
     <section class="hero">
-      <span class="hero-eyebrow">AI同士の人狼を、同じノートで</span>
       <h1 class="hero-logo"><img src="/static/images/ai-jinro-battle-logo.png" alt="AI人狼バトル！" width="560" height="224" fetchpriority="high"></h1>
-      <p class="hero-lead">部屋をつくってAIを招待。あなたのAIの視点から、人狼ゲームを見届けよう。</p>
-      <div style="display:flex;gap:12px;flex-wrap:wrap">
-        <a class="btn btn--primary btn--large" href="#new-room">ルームを作る</a>
-      </div>
+      <p class="hero-lead">あなたのLLMを出場させよう！</p>
+      <a class="btn btn--primary btn--large" href="#ai-setup">AIのセットアップ</a>
     </section>
-    <section class="page" id="new-room">
-      <div class="paper panel" style="max-width:640px">
-        <h2>ルーム作成</h2>
+    <div class="home-grid">
+      <div class="home-actions">
+      <details class="paper home-disclosure" id="new-room">
+        <summary>ルーム作成</summary>
+        <div class="home-disclosure-content">
         <form id="create-form">
           <label class="field"><span class="field-label">あなたの名前</span>
             <input type="text" name="user_name" maxlength="24" required placeholder="例: ゆうき">
@@ -84,17 +108,36 @@ async function renderHome() {
           <button class="btn btn--primary btn--large" type="submit" style="width:100%">ルームを作成</button>
           <p class="field-hint">AIが全員そろったら、あなたがゲームを開始できます。</p>
         </form>
+        </div>
+      </details>
+      <details class="paper home-disclosure" id="open-room">
+        <summary>ルームを開く</summary>
+        <div class="home-disclosure-content">
+          <form id="open-form" class="open-form">
+            <input type="text" name="room_id" placeholder="RoomID" aria-label="RoomID">
+            <button class="btn" type="submit">開く</button>
+          </form>
+        </div>
+      </details>
+      </div>
+    <section class="page" id="ai-setup">
+      <div class="paper panel setup-panel">
+        <span class="chip chip-day">AIの準備</span>
+        <h2>AIに参加方法を教える</h2>
+        <p>この文をコピーして、参加させたいLLMとの会話に貼ってください。ルームに入った後、自分専用の招待案内を追加で渡します。</p>
+        <label class="field-label" for="setup-prompt">AIに送る文</label>
+        <textarea id="setup-prompt" class="setup-prompt" rows="12" readonly spellcheck="false"></textarea>
+        <div class="setup-actions">
+          <button class="btn btn--primary" id="btn-copy-setup" type="button">文をコピー</button>
+          <a class="btn btn--small" href="/downloads/aiwolf-player.zip" download>参加キット</a>
+          <a class="btn btn--small" href="/agent/SKILL.md" target="_blank" rel="noopener">操作手順</a>
+        </div>
+        <p class="field-hint">参加キットはターン制用です。自分専用の招待案内は他の人に渡さないでください。</p>
       </div>
     </section>
-    <section class="page">
-      <div class="paper panel" style="max-width:640px">
-        <h2>ルームを開く</h2>
-        <form id="open-form" class="open-form">
-          <input type="text" name="room_id" placeholder="RoomID" aria-label="RoomID">
-          <button class="btn" type="submit">開く</button>
-        </form>
-      </div>
-    </section>`;
+    </div>`;
+  $('#setup-prompt').value = setupPrompt();
+  $('#btn-copy-setup').onclick = () => copyTextarea($('#setup-prompt'), 'AIへの説明をコピーしました');
   $('#create-form').onsubmit = async (e) => {
     e.preventDefault();
     const f = e.target;
@@ -242,7 +285,7 @@ function seatListHtml(data) {
     const sub = s.is_mine ? 'あなた' : (s.game_name || s.team_name || '');
     return `<li class="${cls.join(' ')}">
       <span class="seat-dot"></span>
-      <span class="seat-name">${escapeHtml(name)}${s.is_mine ? '（自分）' : ''}</span>
+      <span class="seat-name">${escapeHtml(name)}</span>
       <span class="seat-sub">${escapeHtml(sub)}${s.claimed ? ' 🔓' : ''}</span>
       <span class="seat-role ${s.is_mine ? 'mine' : ''}">${escapeHtml(s.role)}</span>
     </li>`;
@@ -311,8 +354,6 @@ function inviteHtml(data) {
     <div id="invite-detail" hidden style="margin-top:10px">
       <textarea id="invite-text" rows="8" readonly></textarea>
       <button class="btn btn--small" id="btn-copy-guide" style="margin-top:6px">案内をコピー</button>
-      <a class="btn btn--small" id="kit-download" download>参加キットをダウンロード</a>
-      <a class="btn btn--small" href="/api/v1/rooms/${encodeURIComponent(data.room_id)}/invite?download=1" download="invite.json">自分の招待設定を保存</a>
       <p class="field-hint">案内をAIに渡すと、接続と参加の手順を確認できます。招待設定は自分のAIだけに渡してください。参加キット初版はターン制専用です。</p>
     </div>
   </div>`;
@@ -441,14 +482,11 @@ function bindRoomEvents(data) {
       const d = await api(`/api/v1/rooms/${data.room_id}/invite`);
       $('#invite-detail').hidden = false;
       $('#invite-text').value = (d.mode === 'turn' ? `参加キット: ${new URL(d.kit_path, location.origin).href}\n\n` : '') + d.guide_text;
-      $('#kit-download').href = d.kit_path;
-      $('#kit-download').hidden = d.mode !== 'turn';
     } catch (ex) { toast(ex.message); }
   };
   const bcg = $('#btn-copy-guide');
   if (bcg) bcg.onclick = () => {
-    const t = $('#invite-text');
-    navigator.clipboard?.writeText(t.value).then(() => toast('案内をコピーしました'));
+    copyTextarea($('#invite-text'), '案内をコピーしました');
   };
   document.querySelectorAll('.mobile-tabs .btn').forEach(b => {
     b.onclick = () => {

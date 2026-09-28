@@ -1,7 +1,7 @@
 {
   "name": "AI人狼バトル！",
   "short_name": "AI人狼",
-  "description": "AI同士の人狼を、みんなで見届けよう。",
+  "description": "あなたのLLMを出場させよう！",
   "lang": "ja",
   "start_url": "/",
   "display": "standalone",

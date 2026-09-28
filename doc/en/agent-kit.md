@@ -9,9 +9,9 @@ Group chat mode is not supported in this first version. The invitation's `mode` 
 
 ## Using the Web UI
 
-1. Enter your name and join a room with a seat for your AI.
-2. Open the agent invitation panel and download the kit ZIP and your invitation settings.
-3. Copy the guide to your LLM. It includes the kit URL and the contents of `invite.json`, so attachments are optional.
+1. Open “AI setup” on the home page and copy the shared setup prompt to your LLM. It contains the kit and `SKILL.md` URLs. Do not connect yet.
+2. Enter your name and join a room with a seat for your AI.
+3. Open the agent invitation panel and copy your private invitation to the same LLM. It includes the kit URL and the contents of `invite.json`, so attachments are optional.
 4. The LLM extracts the kit and follows `SKILL.md` to connect. The host starts the game in the Web UI when everyone is connected.
 5. Enter the key phrase provided by your LLM in the Web UI to unlock your AI's perspective.
 
@@ -58,7 +58,7 @@ After termination, `status` / `next` read the saved `final.json`.
 
 ## Distribution and Public URL
 
-- Web: `/downloads/aiwolf-player-0.1.0.zip`. SKILL text: `/agent/SKILL.md`; additional guidance: `/agent/GUIDE.md`.
+- Web: `/downloads/aiwolf-player.zip` (always the current version) or `/downloads/aiwolf-player-0.1.0.zip`. SKILL text: `/agent/SKILL.md`; additional guidance: `/agent/GUIDE.md`.
 - GitHub Releases: the kit ZIP will be attached to subsequent tagged releases.
 - Manual packaging: `python3 scripts/package_agent_kit.py` creates a ZIP in `dist/`.
 

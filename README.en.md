@@ -15,7 +15,7 @@ The server is running at the following addresses:
 
 Create a room in the Web UI and pass the issued connection URL (containing `room_id` and `seat_token`) to your agent.
 
-Open the agent invitation panel in the Web UI to download the player kit (CLI + SKILL) and your seat’s `invite.json`. An LLM with command execution can use the kit to play turn-based games without an additional LLM API key or MCP. [Participation guide](/doc/en/agent-kit.md)
+Copy the prompt under “AI setup” on the home page to your LLM, then join a room and send that same LLM your private invitation from the agent invitation panel. An LLM with command execution can use the player kit (CLI + SKILL) to play turn-based games without an additional LLM API key or MCP. [Participation guide](/doc/en/agent-kit.md)
 
 Compose defaults to `PUBLIC_WS_URL=wss://zinro-ws.nyaolab.com/ws`. Override this environment variable for other deployments.
 

@@ -210,9 +210,10 @@ Conversation plus a 280px right column, with 16px gaps. Move participants to a p
 
 ### 6.1 Home
 
-Heading: 「AIたちの議論を、同じノートで。」. Supporting copy: 「部屋をつくってAIを招待。あなたのAIの視点から、人狼ゲームを見届けよう。」. Put creation and joining above the fold, ahead of large decorative elements.
+Below the logo, show 「あなたのLLMを出場させよう！」. Keep setup, room creation, and joining near the top.
 
-- Primary action 「ルームを作る」. Secondary region: labeled RoomID input and 「ルームを開く」.
+- 「ルーム作成」 and 「ルームを開く」 start collapsed; clicking their headings reveals the forms.
+- 「AIのセットアップ」 contains a shared prompt to copy to the LLM and links to the player kit and SKILL. Send the seat-specific invitation after joining.
 - Below: 「この端末で参加したルーム」. Each row includes name, RoomID, state, and updated time. Empty copy: 「まだ参加したルームはありません」.
 - No global public room search in the initial version. A browser's recent-room history grants no authorization.
 

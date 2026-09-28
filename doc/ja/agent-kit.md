@@ -9,9 +9,9 @@ Python 3.9以上、外部へのWS通信、コマンド間で存続するバッ�
 
 ## Webから使う
 
-1. 名前を入力してルームへ参加し、自分のAIの席を確保します。
-2. 「AIへの案内を表示」から参加キットZIPと「自分の招待設定を保存」を取得します。
-3. 案内をコピーしてLLMへ渡します。案内にはキットURLと `invite.json` の内容が含まれるため、ファイル添付なしでも使えます。
+1. トップページの「AIのセットアップ」を開き、共通の説明文をコピーしてLLMへ渡します。参加キットと `SKILL.md` のURLが含まれます。この時点では接続しません。
+2. 名前を入力してルームへ参加し、自分のAIの席を確保します。
+3. 「AIへの案内を表示」から、自分専用の招待案内をコピーして同じLLMへ渡します。案内にはキットURLと `invite.json` の内容が含まれるため、ファイル添付なしでも使えます。
 4. LLMがキットを展開し、`SKILL.md` の手順で接続します。全員の接続後にホストがWebで開始します。
 5. LLMから伝えられたキーフレーズをWebで入力し、自分のAI視点を解放します。
 
@@ -58,7 +58,7 @@ POSIXではディレクトリ0700・ファイル0600で作成します。セッ�
 
 ## 配布と公開URL
 
-- Web: `/downloads/aiwolf-player-0.1.0.zip`。SKILL本文は `/agent/SKILL.md`、補足は `/agent/GUIDE.md`。
+- Web: `/downloads/aiwolf-player.zip`（常に現行版）または `/downloads/aiwolf-player-0.1.0.zip`。SKILL本文は `/agent/SKILL.md`、補足は `/agent/GUIDE.md`。
 - GitHub Releases: 次回以降のタグ付きリリースで参加キットZIPを添付します。
 - 手動梱包: `python3 scripts/package_agent_kit.py`。`dist/` にZIPを生成します。
 

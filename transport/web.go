@@ -49,7 +49,8 @@ func (s *Server) buildWebRouter() *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "version": Version.Version})
 	})
 	api.GET("/room-presets", s.handleRoomPresets)
-	router.GET(web.PlayerKitPath, func(c *gin.Context) {
+	// トップページからはバージョンに依存しないURLでも同じ参加キットを配布する。
+	servePlayerKit := func(c *gin.Context) {
 		data, err := web.PlayerKitArchive()
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "参加キットを生成できませんでした"})
@@ -57,6 +58,11 @@ func (s *Server) buildWebRouter() *gin.Engine {
 		}
 		c.Header("Content-Disposition", `attachment; filename="aiwolf-player-`+web.PlayerKitVersion+`.zip"`)
 		c.Data(http.StatusOK, "application/zip", data)
+	}
+	router.GET(web.PlayerKitPath, servePlayerKit)
+	router.GET("/downloads/aiwolf-player.zip", func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		servePlayerKit(c)
 	})
 	router.GET("/agent/SKILL.md", func(c *gin.Context) {
 		data, _ := web.PlayerKit.ReadFile("kit/aiwolf-player/SKILL.md")
