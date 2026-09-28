@@ -25,3 +25,4 @@ func (NoopObserver) OnExecute(string, int, *model.AgentView, model.GameState)   
 func (NoopObserver) OnDivine(string, int, model.AgentView, model.AgentView, model.GameState)     {}
 func (NoopObserver) OnGuard(string, int, model.AgentView, model.AgentView, model.GameState)      {}
 func (NoopObserver) OnAttack(string, int, *model.AgentView, bool, model.GameState)               {}
+func (NoopObserver) OnOwnerMessage(string, int, model.AgentView, string)                         {}

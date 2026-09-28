@@ -7,6 +7,8 @@ type Info struct {
 	Day            int              `json:"day"`
 	Agent          *Agent           `json:"agent"`
 	Profile        *string          `json:"profile,omitempty"`
+	KeyPhrase      string           `json:"key_phrase,omitempty"`
+	OwnerMessages  []string         `json:"owner_messages,omitempty"`
 	MediumResult   *Judge           `json:"medium_result,omitempty"`
 	DivineResult   *Judge           `json:"divine_result,omitempty"`
 	ExecutedAgent  *Agent           `json:"executed_agent,omitempty"`

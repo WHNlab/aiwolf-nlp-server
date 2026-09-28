@@ -25,6 +25,11 @@ type ServerConfig struct {
 		Host string `yaml:"host"`
 		Port int    `yaml:"port"`
 	} `yaml:"web_socket"`
+	Web struct {
+		Enable bool   `yaml:"enable"`
+		Host   string `yaml:"host"`
+		Port   int    `yaml:"port"`
+	} `yaml:"web"`
 	Authentication struct {
 		Enable bool `yaml:"enable"`
 	} `yaml:"authentication"`
@@ -93,10 +98,9 @@ type MatchingConfig struct {
 }
 
 type CustomProfileConfig struct {
-	Enable          bool                 `yaml:"enable"`
-	ProfileEncoding map[string]string    `yaml:"profile_encoding"`
-	Profiles        []Profile            `yaml:"profiles"`
-	DynamicProfile  DynamicProfileConfig `yaml:"dynamic_profile"`
+	Enable          bool              `yaml:"enable"`
+	ProfileEncoding map[string]string `yaml:"profile_encoding"`
+	Profiles        []Profile         `yaml:"profiles"`
 }
 
 type Profile struct {
@@ -104,15 +108,6 @@ type Profile struct {
 	AvatarURL string            `yaml:"avatar_url"`
 	VoiceID   int               `yaml:"voice_id"`
 	Arguments map[string]string `yaml:",inline"`
-}
-
-type DynamicProfileConfig struct {
-	Enable    bool     `yaml:"enable"`
-	Prompt    string   `yaml:"prompt"`
-	Attempts  int      `yaml:"attempts"`
-	Model     string   `yaml:"model"`
-	MaxTokens int      `yaml:"max_tokens"`
-	Avatars   []string `yaml:"avatars"`
 }
 
 type JSONLoggerConfig struct {

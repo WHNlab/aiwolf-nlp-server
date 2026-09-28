@@ -19,4 +19,14 @@ func (c *Config) ApplyEnvOverrides() {
 			slog.Warn("PORTの解析に失敗しました", "value", v, "error", err)
 		}
 	}
+	if v := os.Getenv("WEB_HOST"); v != "" {
+		c.Server.Web.Host = v
+	}
+	if v := os.Getenv("WEB_PORT"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil {
+			c.Server.Web.Port = p
+		} else {
+			slog.Warn("WEB_PORTの解析に失敗しました", "value", v, "error", err)
+		}
+	}
 }

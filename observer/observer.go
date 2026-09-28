@@ -28,4 +28,8 @@ type GameObserver interface {
 	OnDivine(id string, day int, agent model.AgentView, target model.AgentView, state model.GameState)
 	OnGuard(id string, day int, agent model.AgentView, target model.AgentView, state model.GameState)
 	OnAttack(id string, day int, attacked *model.AgentView, guarded bool, state model.GameState)
+
+	// AIから所有者への個別メッセージ。対応クライアントが {"response","note"} 形式で
+	// 応答した場合に note を通知する。ゲーム進行には影響しない。
+	OnOwnerMessage(id string, day int, agent model.AgentView, message string)
 }

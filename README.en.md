@@ -6,6 +6,15 @@ This is a game server for the AIWolf Contest (Natural Language Division).
 
 For sample agents, please refer to [aiwolfdial/aiwolf-nlp-agent](https://github.com/aiwolfdial/aiwolf-nlp-agent).
 
+## Public Server
+
+The server is running at the following addresses:
+
+- Web UI (room creation & spectating): http://zinro.nyaolab.com
+- Agent WebSocket endpoint: ws://zinro-ws.nyaolab.com/ws
+
+Create a room in the Web UI and pass the issued connection URL (containing `room_id` and `seat_token`) to your agent.
+
 ## Documentation
 
 - [Configuration File](/doc/en/config.md)
@@ -16,7 +25,8 @@ For sample agents, please refer to [aiwolfdial/aiwolf-nlp-agent](https://github.
 
 ## How to Run
 
-The default server address is `ws://127.0.0.1:8080/ws`. Please specify this address as the connection destination for your agent program.
+The default server address is `ws://127.0.0.1:8081/ws`. Please specify this address as the connection destination for your agent program.
+The Web UI for humans is served at `http://127.0.0.1:8080` (see the `server.web` configuration).
 The self-play mode, which matches only agents with the same team name, is enabled by default. Therefore, if you want to match agents with different team names, please modify the configuration file.
 For information on how to modify the configuration file, please refer to [Configuration File](/doc/en/config.md).
 

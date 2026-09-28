@@ -7,7 +7,6 @@
 リリースされたバイナリを実行する場合は `./.env` を、リポジトリから直接実行する場合は `./config/.env` を読み込みます。
 
 - `SECRET_KEY`: 設定ファイルの `server.authentication.enable` が `true` の場合にトークン検証時の秘密鍵
-- `OPENAI_API_KEY`: 設定ファイルの `custom_profile.dynamic_profile.enable` が `true` の場合に使用するChatGPTのAPIキー
 
 ### 設定の上書き
 
@@ -16,6 +15,8 @@
 
 - `HOST`: `server.web_socket.host` の上書き
 - `PORT`: `server.web_socket.port` の上書き
+- `WEB_HOST`: `server.web.host` の上書き
+- `WEB_PORT`: `server.web.port` の上書き
 
 ## server (サーバ設定)
 
@@ -24,8 +25,18 @@
 - `host`: WebSocketサーバのホスト名
   同一マシン内で接続する場合は `127.0.0.1` を指定してください。
   ローカル内のマシンや外部から接続する場合は `0.0.0.0` を指定してください。
-- `port`: WebSocketサーバのポート番号
-  基本的に変更する必要はありません。
+- `port`: WebSocketサーバのポート番号（エージェント接続用。既定は 8081）
+
+### web (Web UIの設定)
+
+人間がブラウザから部屋の作成・観戦・自分のAIへの助言を行うためのHTTPサーバです。
+
+- `enable`: Web UIを有効にするかどうか。配布設定では `true`。
+- `host`: Web UIサーバのホスト名。`web_socket.host` と同じ運用にしてください。
+- `port`: Web UIサーバのポート番号（既定は 8080）
+
+Web UIを有効にすると、エージェント用WebSocket側の `/api/v1/games` 系エンドポイントは公開されません。
+観戦にはWeb側のルームAPI（`GET /api/v1/rooms/...`）を使います。
 
 ### authentication (認証の設定)
 
@@ -125,7 +136,7 @@
 
 - `enable`: カスタムプロフィールを有効にするかどうか
   基本的には `true` で問題ありません。
-- `profile_encoding`: カスタムプロフィールもしくは動的プロフィールのうち、エンコードされる項目
+- `profile_encoding`: カスタムプロフィールのうち、エンコードされる項目
   キーが各プロフィールの項目名、値がエージェントに送信される際のラベルです。ここに記載されていない項目は送信されません。
 
 ### profiles (各エージェントのカスタムプロフィール)
@@ -140,16 +151,6 @@
 `age` `gender` `personality` は `profile_encoding` のキーに対応する項目の例です。\
 `profile_encoding` に追加すれば、任意の項目を定義できます。
 
-### dynamic_profile (動的プロフィールの設定)
-
-- `enable`: 動的プロフィールを有効にするかどうか
-  デバッグ目的の場合は `false` で問題ありません。
-  本戦では事前に準備したカスタムプロフィール(`custom_profile`に記述されているもの)ではなく、ChatGPTを使用して動的にプロフィールを生成します。そのため、より本戦に近い環境で動作させるためには、`true` にしてください。
-- `prompt`: プロフィール生成のためのプロンプト
-- `attempts`: プロフィール生成の試行回数
-- `model`: プロフィール生成のためのモデル
-- `max_tokens`: プロフィール生成時の最大トークン数
-- `avatars`: プロフィール生成に使用するアバター画像のURL
 
 ## json_logger (JSONロガーの設定)
 

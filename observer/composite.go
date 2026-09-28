@@ -110,3 +110,9 @@ func (c *Composite) OnAttack(id string, day int, attacked *model.AgentView, guar
 		o.OnAttack(id, day, attacked, guarded, state)
 	}
 }
+
+func (c *Composite) OnOwnerMessage(id string, day int, agent model.AgentView, message string) {
+	for _, o := range c.observers {
+		o.OnOwnerMessage(id, day, agent, message)
+	}
+}

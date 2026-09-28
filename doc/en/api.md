@@ -14,9 +14,9 @@ All responses include `Access-Control-Allow-Origin: *`.
 | `GET /api/v1/healthz` | Not required | Liveness check |
 | `GET /api/v1/readyz` | Not required | Whether new connections are accepted |
 | `GET /api/v1/ruleset` | Not required | The ruleset this server is running |
-| `GET /api/v1/games` | Required | List of games in progress |
-| `GET /api/v1/games/{id}` | Required | Current state of the specified game |
-| `GET /api/v1/games/{id}/events` | Required | Event stream for the specified game (SSE) |
+| `GET /api/v1/games` | Required | List of games in progress (not published when `server.web.enable` is `true`) |
+| `GET /api/v1/games/{id}` | Required | Current state of the specified game (same as above) |
+| `GET /api/v1/games/{id}/events` | Required | Event stream for the specified game (SSE) (same as above) |
 | `GET /realtime/...` | Required | Static delivery of realtime broadcaster logs |
 | `GET /tts/...` | Not required | Static delivery of TTS segments |
 
@@ -37,6 +37,28 @@ curl -H "Authorization: Bearer <TOKEN>" http://127.0.0.1:8080/api/v1/games
 ```
 
 If the token is missing or invalid, `401 Unauthorized` is returned.
+
+## Room API (Web UI)
+
+When `server.web.enable` is `true`, a separate HTTP server for the Web UI (`server.web.host` / `server.web.port`, default 8080) starts and exposes the following room APIs.+Human viewers are identified by an HttpOnly session cookie (`aiwolf_session`), and roles and private exchanges are filtered per session according to their viewing permission.+Mutating endpoints apply a lightweight CSRF check using the Origin header.
+
+| Endpoint | Description |
+| --- | --- |
+| `GET /api/v1/room-presets` | List of supported player counts, role compositions, and communication modes |
+| `POST /api/v1/rooms` | Create a room (body: `room_name`, `user_name`, `agent_count`, `mode`) |
+| `POST /api/v1/rooms/{id}/join` | Join a room (body: `name`, `mode`; mode=participate reserves a seat) |
+| `POST /api/v1/rooms/{id}/leave` | Leave while the room is waiting |
+| `POST /api/v1/rooms/{id}/close` | The host closes the room |
+| `POST /api/v1/rooms/{id}/start` | The host starts the game (all seats must have an agent connected) |
+| `POST /api/v1/rooms/{id}/claim` | Verify the key phrase to unlock your own agent's viewpoint (body: `phrase`) |
+| `POST /api/v1/rooms/{id}/consultations` | Send advice to your own agent (body: `text`; only while alive and after unlocking) |
+| `GET /api/v1/rooms/{id}/consultations` | List the private exchanges between you and your agent |
+| `GET /api/v1/rooms/{id}/invite` | Returns the agent connection URL (`room_id` + `seat_token`) and guide text for your seat |
+| `GET /api/v1/rooms/{id}` | Current room state; roles are masked according to the viewer's perspective |
+| `GET /api/v1/rooms/{id}/history?cursor=N` | Event history filtered by viewing permission (seq > cursor) |
+| `GET /api/v1/rooms/{id}/events` | Event stream (SSE, event name `room`) |
+
+The viewpoint (`viewer.view_mode`) is one of `public` / `agent` / `omniscient`.+After the game ends or is aborted, and for viewers whose own agent has died, the viewpoint becomes `omniscient` and all information including roles and attack votes is visible.
 
 ## Endpoint Details
 

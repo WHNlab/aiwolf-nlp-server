@@ -26,7 +26,18 @@ type Agent struct {
 	Role               Role
 	Connection         *websocket.Conn
 	HasError           bool
+	KeyPhrase          string
+	OwnerInbox         *OwnerInbox
 	msgChan            chan AgentMessage
+}
+
+// conn.Seat があれば席情報（キーフレーズ・助言の受信箱）をエージェントへ引き渡す。
+func applySeatContext(a *Agent, conn Connection) {
+	if conn.Seat == nil {
+		return
+	}
+	a.KeyPhrase = conn.Seat.KeyPhrase
+	a.OwnerInbox = conn.Seat.Inbox
 }
 
 func NewAgent(idx int, role Role, conn Connection) *Agent {
@@ -41,6 +52,7 @@ func NewAgent(idx int, role Role, conn Connection) *Agent {
 		Connection:         conn.Conn,
 		HasError:           false,
 	}
+	applySeatContext(agent, conn)
 	agent.startReader()
 	slog.Info("エージェントを作成しました", "idx", agent.Idx, "agent", agent.String(), "role", agent.Role, "connection", agent.Connection.RemoteAddr())
 	return agent
@@ -66,6 +78,7 @@ func NewAgentWithProfile(idx int, role Role, conn Connection, profile Profile, e
 		Connection:         conn.Conn,
 		HasError:           false,
 	}
+	applySeatContext(agent, conn)
 	agent.startReader()
 	slog.Info("エージェントを作成しました", "idx", agent.Idx, "agent", agent.String(), "profile", agent.ProfileDescription, "role", agent.Role, "connection", agent.Connection.RemoteAddr())
 	return agent

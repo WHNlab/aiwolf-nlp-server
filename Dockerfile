@@ -25,5 +25,6 @@ COPY --from=build /out/aiwolf-nlp-server /aiwolf-nlp-server
 COPY --from=build /src/config/*.yml /config/
 
 EXPOSE 8080
+EXPOSE 8081
 ENTRYPOINT ["/aiwolf-nlp-server"]
 CMD ["-c", "/config/default_5.yml"]

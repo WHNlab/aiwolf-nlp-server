@@ -7,7 +7,6 @@
 When running a released binary, `./.env` is loaded; when running directly from the repository, `./config/.env` is loaded.
 
 - `SECRET_KEY`: The secret key used for token verification when `server.authentication.enable` is set to `true` in the configuration file.
-- `OPENAI_API_KEY`: The API key for ChatGPT used when `custom_profile.dynamic_profile.enable` is set to `true` in the configuration file.
 
 ### Overriding the Configuration
 
@@ -16,6 +15,8 @@ When they are not set, the values from the configuration file are used.
 
 - `HOST`: Overrides `server.web_socket.host`.
 - `PORT`: Overrides `server.web_socket.port`.
+- `WEB_HOST`: Overrides `server.web.host`.
+- `WEB_PORT`: Overrides `server.web.port`.
 
 ## server (Server Settings)
 
@@ -24,8 +25,18 @@ When they are not set, the values from the configuration file are used.
 - `host`: The hostname of the WebSocket server.
   For connecting within the same machine, set it to `127.0.0.1`.
   For connecting from a local or external machine, set it to `0.0.0.0`.
-- `port`: The port number for the WebSocket server.
-  It generally does not need to be changed.
+- `port`: The port number for the WebSocket server (for agent connections; the default is 8081).
+
+### web (Web UI Settings)
+
+An HTTP server that lets humans create rooms, watch games, and advise their own AI from a browser.
+
+- `enable`: Whether to enable the Web UI. The distributed configurations set this to `true`.
+- `host`: The hostname of the Web UI server. Operate it the same way as `web_socket.host`.
+- `port`: The port number of the Web UI server (the default is 8080).
+
+When the Web UI is enabled, the `/api/v1/games` endpoints on the agent WebSocket server are not published.
+Use the room APIs on the web side (`GET /api/v1/rooms/...`) to watch games.
 
 ### authentication (Authentication Settings)
 
@@ -125,7 +136,7 @@ The total number of roles should match the sum of all the keys.
 
 - `enable`: Whether to enable custom profiles.
   Generally, it should be set to `true`.
-- `profile_encoding`: Items to be encoded in custom profiles or dynamic profiles.
+- `profile_encoding`: Items to be encoded in custom profiles.
   The key is the item name in each profile, and the value is the label used when the profile is sent to the agent. Items not listed here are not sent.
 
 ### profiles (Custom Profiles for Each Agent)
@@ -140,16 +151,6 @@ The total number of roles should match the sum of all the keys.
 `age`, `gender`, and `personality` are examples of items corresponding to the keys of `profile_encoding`.
 Any item can be defined by adding it to `profile_encoding`.
 
-### dynamic_profile (Dynamic Profile Settings)
-
-- `enable`: Whether to enable dynamic profiles.
-  For debugging purposes, it can be set to `false`.
-  In actual use, to simulate a more realistic environment, it should be set to `true`, where dynamic profiles are generated using ChatGPT instead of custom profiles prepared in advance.
-- `prompt`: The prompt used for generating the profile.
-- `attempts`: The number of attempts to generate the profile.
-- `model`: The model used for profile generation.
-- `max_tokens`: The maximum number of tokens for profile generation.
-- `avatars`: The URLs of the avatars used for generating the profile.
 
 ## json_logger (JSON Logger Settings)
 

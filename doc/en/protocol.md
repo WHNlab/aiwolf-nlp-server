@@ -39,6 +39,28 @@ For detailed implementation, refer to [request.go](../model/request.go) and [pac
 
 Responses can either return natural language strings from the agents in response to Talk and Whisper requests (e.g., `Hello`) or return the name of the target agent (e.g., `Agent[01]`) for requests like Voting or Divining.
 
+### Agent Connection Endpoints
+
+Agents connect to `ws://<host>:<port>/ws`. The connection is routed in two ways depending on the query parameters.
+
+- Without query parameters: the agent is registered in the waiting room and a game starts through matchmaking, as before.
+- `?room_id=<ROOM_ID>&seat_token=<TOKEN>`: the agent joins a seat of a room created via the Web UI. Obtain the URL from the room's agent invitation information.
+
+Agents that join a room receive no packets after the initial NAME request until the game starts.
+
+### Extended Response (Room Mode)
+
+Agents that joined a room may return the following JSON object instead of a raw string.
+
+```json
+{"response": "Hello", "note": "I will hold off on claiming Seer on day 1."}
+```
+
+- `response`: The actual reply to the game (a talk text or a target name). Required.
+- `note`: A private memo delivered only to the seat owner (the human on the Web UI). Optional. Invisible to other agents in the game.
+
+If the message is not valid JSON or `response` is empty, the whole message is treated as the response, as before.
+
 ## Structure of Requests
 
 Packet structure.
@@ -175,6 +197,8 @@ The structure that contains information about the current state of the game with
 - remain_count (int | None): The maximum number of remaining possible talk or whisper requests (only for `TALK` or `WHISPER` requests).
 - remain_length (int | None): The maximum number of characters that can be consumed by remaining talk or whisper requests, excluding the minimum character count. If no limit, set to None.
 - remain_skip (int | None): The number of remaining skips allowed for talk or whisper requests (only for `TALK` or `WHISPER` requests).
+- key_phrase (str | None): A key phrase included only for agents that joined a room. When the owner enters it in the Web UI, the viewpoint of their own agent is unlocked. Pass it to your owner privately.
+- owner_messages (list[str] | None): A list of advice messages from the owner, included only for agents that joined a room. All unread messages at the time of sending are delivered together.
 
 ### Judge
 

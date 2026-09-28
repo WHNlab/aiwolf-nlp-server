@@ -1,0 +1,128 @@
+server:
+  web_socket:
+    host: 127.0.0.1
+    port: 8081
+  web:
+    enable: true
+    host: 127.0.0.1
+    port: 8080
+  authentication:
+    enable: false
+  timeout:
+    action: 60s
+    response: 120s
+    acceptable: 5s
+  max_continue_error_ratio: 0.2
+
+game:
+  agent_count: 5
+  max_day: 2
+  vote_visibility: false
+  talk:
+    max_count:
+      per_agent: 4
+      per_day: 28
+    max_length:
+      count_in_word: false
+      per_talk: -1
+      mention_length: 50
+      per_agent: -1
+      base_length: 50
+    max_skip: 0
+  whisper:
+    max_count:
+      per_agent: 4
+      per_day: 12
+    max_length:
+      count_in_word: false
+      per_talk: -1
+      mention_length: 50
+      per_agent: -1
+      base_length: 50
+    max_skip: 0
+  vote:
+    max_count: 1
+    allow_self_vote: true
+  attack_vote:
+    max_count: 1
+    allow_self_vote: true
+    allow_no_target: false
+
+logic:
+  day_phases:
+    - name: "talk"
+      actions: ["talk"]
+  night_phases:
+  roles:
+    5:
+      WEREWOLF: 1
+      POSSESSED: 1
+      SEER: 1
+      BODYGUARD: 0
+      VILLAGER: 2
+      MEDIUM: 0
+
+matching:
+  self_match: false
+  is_optimize: true
+  team_count: 5
+  game_count: 1
+  output_path: ./config/role5.json
+  infinite_loop: false
+
+custom_profile:
+  enable: true
+  profile_encoding:
+    age: 年齢
+    gender: 性別
+    personality: 性格
+  profiles:
+    - name: Player1
+      avatar_url:
+      voice_id:
+      age:
+      gender:
+      personality:
+    - name: Player2
+      avatar_url:
+      voice_id:
+      age:
+      gender:
+      personality:
+    - name: Player3
+      avatar_url:
+      voice_id:
+      age:
+      gender:
+      personality:
+    - name: Player4
+      avatar_url:
+      voice_id:
+      age:
+      gender:
+      personality:
+    - name: Player5
+      avatar_url:
+      voice_id:
+      age:
+      gender:
+      personality:
+
+json_logger:
+  enable: true
+  output_dir: ./../log/json
+  filename: "{game_id}"
+
+game_logger:
+  enable: true
+  output_dir: ./../log/game
+  filename: "{game_id}"
+
+realtime_broadcaster:
+  enable: true
+  delay: 0s
+  output_dir: ./../log/realtime
+  filename: "{game_id}"
+
+tts_broadcaster:
+  enable: false

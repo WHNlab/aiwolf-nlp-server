@@ -4,6 +4,10 @@
 server:
   web_socket:
     host: 127.0.0.1
+    port: 8081
+  web:
+    enable: true
+    host: 127.0.0.1
     port: 8080
   authentication:
     enable: false
@@ -81,6 +85,20 @@ logic:
       SEER: 1
       BODYGUARD: 1
       VILLAGER: 3
+      MEDIUM: 1
+    5:
+      WEREWOLF: 1
+      POSSESSED: 1
+      SEER: 1
+      BODYGUARD: 0
+      VILLAGER: 2
+      MEDIUM: 0
+    13:
+      WEREWOLF: 3
+      POSSESSED: 1
+      SEER: 1
+      BODYGUARD: 1
+      VILLAGER: 6
       MEDIUM: 1
 
 matching:
@@ -242,38 +260,6 @@ custom_profile:
       age: 78
       gender: 女性
       personality: シズエは非常に穏やかで優しい性格を持っています。年齢を重ねてもなお、周囲に対して温かい微笑みを絶やさず、思いやり深い人物です。いつも周りの人々を気遣い、親しみやすく、少しお茶目な一面も見せることがあります。時折、元気がない人に優しく声をかけたり、助けが必要なときには手を差し伸べることを惜しまないため、村や地域で多くの人々に愛されています。しずえは、長年の人生経験を通して、人々と穏やかに過ごすことの大切さを知っています。
-  dynamic_profile:
-    enable: false
-    prompt: このキャラクターのプロフィールを生成してください。ただし、人狼ゲームに関わることは出力しないでください。名前についてはファーストネームのみをフリガナなしで出力してください。
-    attempts: 3
-    model: gpt-4o-mini
-    max_tokens: 300
-    avatars:
-      - https://aiwolfdial.github.io/aiwolf-nlp-viewer/images/male/01.png
-      - https://aiwolfdial.github.io/aiwolf-nlp-viewer/images/male/02.png
-      - https://aiwolfdial.github.io/aiwolf-nlp-viewer/images/male/03.png
-      - https://aiwolfdial.github.io/aiwolf-nlp-viewer/images/male/04.png
-      - https://aiwolfdial.github.io/aiwolf-nlp-viewer/images/male/05.png
-      - https://aiwolfdial.github.io/aiwolf-nlp-viewer/images/male/06.png
-      - https://aiwolfdial.github.io/aiwolf-nlp-viewer/images/male/07.png
-      - https://aiwolfdial.github.io/aiwolf-nlp-viewer/images/male/08.png
-      - https://aiwolfdial.github.io/aiwolf-nlp-viewer/images/male/09.png
-      - https://aiwolfdial.github.io/aiwolf-nlp-viewer/images/male/10.png
-      - https://aiwolfdial.github.io/aiwolf-nlp-viewer/images/male/11.png
-      - https://aiwolfdial.github.io/aiwolf-nlp-viewer/images/male/12.png
-      - https://aiwolfdial.github.io/aiwolf-nlp-viewer/images/female/01.png
-      - https://aiwolfdial.github.io/aiwolf-nlp-viewer/images/female/02.png
-      - https://aiwolfdial.github.io/aiwolf-nlp-viewer/images/female/03.png
-      - https://aiwolfdial.github.io/aiwolf-nlp-viewer/images/female/04.png
-      - https://aiwolfdial.github.io/aiwolf-nlp-viewer/images/female/05.png
-      - https://aiwolfdial.github.io/aiwolf-nlp-viewer/images/female/06.png
-      - https://aiwolfdial.github.io/aiwolf-nlp-viewer/images/female/07.png
-      - https://aiwolfdial.github.io/aiwolf-nlp-viewer/images/female/08.png
-      - https://aiwolfdial.github.io/aiwolf-nlp-viewer/images/female/09.png
-      - https://aiwolfdial.github.io/aiwolf-nlp-viewer/images/female/10.png
-      - https://aiwolfdial.github.io/aiwolf-nlp-viewer/images/female/11.png
-      - https://aiwolfdial.github.io/aiwolf-nlp-viewer/images/female/12.png
-
 json_logger:
   enable: true
   output_dir: ./log/json

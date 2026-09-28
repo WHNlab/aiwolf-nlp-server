@@ -54,14 +54,8 @@ func NewSetting(config Config) (*Setting, error) {
 		return nil, err
 	}
 	if config.CustomProfile.Enable {
-		if config.CustomProfile.DynamicProfile.Enable {
-			if len(config.CustomProfile.DynamicProfile.Avatars) < config.Game.AgentCount {
-				return nil, errors.New("カスタムプロフィールのアバターがエージェント数より少ないです")
-			}
-		} else {
-			if len(config.CustomProfile.Profiles) < config.Game.AgentCount {
-				return nil, errors.New("カスタムプロフィールの人数がエージェント数より少ないです")
-			}
+		if len(config.CustomProfile.Profiles) < config.Game.AgentCount {
+			return nil, errors.New("カスタムプロフィールの人数がエージェント数より少ないです")
 		}
 	}
 	if config.Game.Talk.MaxLength.CountInWord && config.Game.Talk.MaxLength.CountSpaces {

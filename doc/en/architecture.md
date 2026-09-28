@@ -16,8 +16,12 @@ flowchart LR
     A["Agent"] -->|"WebSocket /ws"| T["transport"]
     T --> W["matchmaking<br/>waiting room"]
     W --> M["orchestrator<br/>GameManager"]
+    T --> R["room<br/>Manager"]
+    R --> G2["logic<br/>Game"]
+    B["Browser"] -->|"HTTP /api/v1/rooms, SSE"| T
     M --> G["logic<br/>Game"]
     G --> O["observer<br/>GameObserver"]
+    G2 --> O
     O --> S1["service<br/>JSON logger"]
     O --> S2["service<br/>game logger"]
     O --> S3["service<br/>realtime broadcaster"]
@@ -32,15 +36,27 @@ flowchart LR
 | `transport` | Accepting WebSocket connections, HTTP router, REST API, token verification, signal handling |
 | `orchestrator` | `GameManager`. Handles creation and disposal of games once matching succeeds |
 | `matchmaking` | Waiting room, match optimizer, analysis and reduction of match history |
+| `room` | Room management for the Web UI. Seats, sessions, and per-viewer event projection |
 | `logic` | Game logic. Day progression, each phase, aggregation and limiting of speeches |
 | `model` | Data structures such as configuration, packets, and agents |
 | `observer` | The interface for game event notification and the shared broadcasting implementation |
 | `service` | Implementations of observer. JSON logging, game logging, realtime broadcasting, TTS broadcasting |
 | `store` | Persistence of the match optimizer state |
 | `util` | Helper functions for authentication, length counting, profile generation, and so on |
+| `web` | Embedding of the Web UI static files (`embed.FS`) |
 
-The direction of dependency is `transport` → `orchestrator` → `logic` → `observer` → `model`.
+The direction of dependency is `transport` → `orchestrator` / `room` → `logic` → `observer` → `model`.
 `model` depends on no other package, and `observer` depends only on `model`.
+
+## Port Separation
+
+When `server.web.enable` is `true`, a single process starts two listeners.
+
+- `server.web_socket` (default 8081): The agent-facing `/ws` and `/api/v1` (health checks, etc.). Connections carrying the `room_id` + `seat_token` query are assigned to a seat in `room.Manager` instead of the waiting room.
+- `server.web` (default 8080): The Web UI and the `/api/v1/rooms` room APIs for humans. `/ws` and `/api/v1/games` are not published here.
+
+Room games are created by `room.Manager` through a separate path from `matchmaking.GameManager`.\
+Game events are recorded into the room history via a dedicated recorder (`room/gameRecorder`, an observer implementation), filtered by each viewer's perspective (public / own agent / omniscient), and delivered over SSE.
 
 ## From Startup to a Game
 
@@ -107,9 +123,10 @@ The following can be specified in `.env` or in the process environment.
 | Environment Variable | Purpose |
 | --- | --- |
 | `SECRET_KEY` | The secret key for token verification when `server.authentication.enable` is `true` |
-| `OPENAI_API_KEY` | The ChatGPT API key used when `custom_profile.dynamic_profile.enable` is `true` |
 | `HOST` | Overrides `server.web_socket.host` |
 | `PORT` | Overrides `server.web_socket.port` |
+| `WEB_HOST` | Overrides `server.web.host` |
+| `WEB_PORT` | Overrides `server.web.port` |
 
 `HOST` and `PORT` exist so that the listening address can be changed for container execution without editing the configuration file.
 When they are not set, the values from the configuration file are used.

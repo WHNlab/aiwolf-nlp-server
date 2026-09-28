@@ -14,9 +14,9 @@
 | `GET /api/v1/healthz` | 不要 | 死活監視 |
 | `GET /api/v1/readyz` | 不要 | 接続の受付可否 |
 | `GET /api/v1/ruleset` | 不要 | このサーバが実行中のルール |
-| `GET /api/v1/games` | 必要 | 進行中のゲーム一覧 |
-| `GET /api/v1/games/{id}` | 必要 | 指定したゲームの現在状態 |
-| `GET /api/v1/games/{id}/events` | 必要 | 指定したゲームのイベント配信 (SSE) |
+| `GET /api/v1/games` | 必要 | 進行中のゲーム一覧 (`server.web.enable` が `true` の場合は公開されません) |
+| `GET /api/v1/games/{id}` | 必要 | 指定したゲームの現在状態 (同上) |
+| `GET /api/v1/games/{id}/events` | 必要 | 指定したゲームのイベント配信 (SSE) (同上) |
 | `GET /realtime/...` | 必要 | リアルタイムブロードキャストログの静的配信 |
 | `GET /tts/...` | 不要 | TTS セグメントの静的配信 |
 
@@ -37,6 +37,28 @@ curl -H "Authorization: Bearer <TOKEN>" http://127.0.0.1:8080/api/v1/games
 ```
 
 トークンが無い、もしくは無効な場合は `401 Unauthorized` を返します。
+
+## ルーム API (Web UI)
+
+`server.web.enable` が `true` の場合、Web UI 用の HTTP サーバ (`server.web.host` / `server.web.port`, 既定 8080) が別ポートで起動し、以下のルーム API を公開します。+人間の閲覧者は HttpOnly Cookie (`aiwolf_session`) のセッションで識別され、役職や個別のやり取りはセッションごとの閲覧権限でフィルタされます。+更新系のエンドポイントは Origin ヘッダによる簡易 CSRF 対策を行います。
+
+| エンドポイント | 説明 |
+| --- | --- |
+| `GET /api/v1/room-presets` | 対応している人数・役職構成・通信方式の一覧 |
+| `POST /api/v1/rooms` | ルームを作成する (body: `room_name`, `user_name`, `agent_count`, `mode`) |
+| `POST /api/v1/rooms/{id}/join` | 入室する (body: `name`, `mode`。mode=participate なら席を確保) |
+| `POST /api/v1/rooms/{id}/leave` | 待機中に退室する |
+| `POST /api/v1/rooms/{id}/close` | ホストが部屋を閉じる |
+| `POST /api/v1/rooms/{id}/start` | ホストがゲームを開始する (全席にAI接続済みであること) |
+| `POST /api/v1/rooms/{id}/claim` | キーフレーズを検証して自分のAIの視点を解放する (body: `phrase`) |
+| `POST /api/v1/rooms/{id}/consultations` | 自分のAIへ助言を送る (body: `text`。生存中・視点解放済みのみ) |
+| `GET /api/v1/rooms/{id}/consultations` | 自分とAIの個別のやり取り一覧 |
+| `GET /api/v1/rooms/{id}/invite` | 自分の席のAI接続URL (`room_id` + `seat_token`) と案内文を返す |
+| `GET /api/v1/rooms/{id}` | ルームの現在状態。閲覧者の視点に応じて役職をマスクする |
+| `GET /api/v1/rooms/{id}/history?cursor=N` | 閲覧権限でフィルタしたイベント履歴 (seq > cursor) |
+| `GET /api/v1/rooms/{id}/events` | イベント配信 (SSE、イベント名 `room`) |
+
+視点 (`viewer.view_mode`) は `public` / `agent` / `omniscient` の3種類です。+ゲーム終了・中断後、または自分のAIが死亡した閲覧者は `omniscient` となり、役職・襲撃投票などを含む全情報が見えます。
 
 ## 各エンドポイント
 

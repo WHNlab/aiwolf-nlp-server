@@ -39,6 +39,17 @@ func (g *Game) buildInfo(agent *model.Agent) model.Info {
 		Day:    g.currentDay,
 		Agent:  agent,
 	}
+	// ルーム参加のAIには視点解放用のキーフレーズを毎パケット同梱する。
+	// キーフレーズはAIが所有者へ個別に伝える前提で、ゲーム内の公開情報には混ざらない。
+	if agent.KeyPhrase != "" {
+		info.KeyPhrase = agent.KeyPhrase
+	}
+	// 所有者からの助言を送信直前に取り出して同梱する。
+	if agent.OwnerInbox != nil {
+		if msgs := agent.OwnerInbox.Drain(); len(msgs) > 0 {
+			info.OwnerMessages = msgs
+		}
+	}
 	gameStatus := g.getCurrentGameStatus()
 	lastGameStatus := g.gameStatuses[g.currentDay-1]
 	if lastGameStatus != nil {
@@ -125,7 +136,28 @@ func (g *Game) requestToAgent(agent *model.Agent, request model.Request) (string
 	g.obs.OnRequest(g.id, agent.View(), reqBytes)
 	resp, err := agent.SendPacket(packet, g.ruleset.ActionTimeout(), g.ruleset.ResponseTimeout(), g.ruleset.AcceptableTimeout())
 	g.obs.OnResponse(g.id, agent.View(), resp, err)
-	return resp, err
+	if err != nil {
+		return resp, err
+	}
+	// {"response","note"} 形式なら応答本文と所有者へのメモに分離する。
+	text, note := parseAgentResponse(resp)
+	if note != "" {
+		g.obs.OnOwnerMessage(g.id, g.currentDay, agent.View(), note)
+	}
+	return text, nil
+}
+
+// parseAgentResponse は拡張応答 {"response": "...", "note": "..."} を受け付ける。
+// 従来のプレーンテキスト応答はそのまま返す。
+func parseAgentResponse(resp string) (text string, note string) {
+	var ext struct {
+		Response string `json:"response"`
+		Note     string `json:"note"`
+	}
+	if err := json.Unmarshal([]byte(resp), &ext); err == nil && ext.Response != "" {
+		return ext.Response, ext.Note
+	}
+	return resp, ""
 }
 
 func (g *Game) resetLastIdxMaps() {

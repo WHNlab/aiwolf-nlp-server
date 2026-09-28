@@ -16,8 +16,12 @@ flowchart LR
     A["エージェント"] -->|"WebSocket /ws"| T["transport"]
     T --> W["matchmaking<br/>待機部屋"]
     W --> M["orchestrator<br/>GameManager"]
+    T --> R["room<br/>Manager"]
+    R --> G2["logic<br/>Game"]
+    B["ブラウザ"] -->|"HTTP /api/v1/rooms, SSE"| T
     M --> G["logic<br/>Game"]
     G --> O["observer<br/>GameObserver"]
+    G2 --> O
     O --> S1["service<br/>JSONロガー"]
     O --> S2["service<br/>ゲームロガー"]
     O --> S3["service<br/>リアルタイム配信"]
@@ -32,15 +36,27 @@ flowchart LR
 | `transport` | WebSocket 接続の受付、HTTP ルータ、REST API、トークン検証、シグナル処理 |
 | `orchestrator` | `GameManager`。マッチング成立からゲームの生成・破棄までを担う |
 | `matchmaking` | 待機部屋、マッチオプティマイザ、マッチ履歴の解析・縮約 |
+| `room` | Web UI用のルーム管理。席・セッション・閲覧権限ごとのイベント投影 |
 | `logic` | ゲームロジック。日付進行、各フェーズ、発言の集約と制限 |
 | `model` | 設定・パケット・エージェント等のデータ構造 |
 | `observer` | ゲームイベントの通知インターフェースと配信の共通実装 |
 | `service` | observer の実装。JSON ログ、ゲームログ、リアルタイム配信、TTS 配信 |
 | `store` | マッチオプティマイザの状態の永続化 |
 | `util` | 認証、文字数カウント、プロフィール生成などの補助関数 |
+| `web` | Web UIの静的ファイルの埋め込み（`embed.FS`） |
 
-依存の向きは `transport` → `orchestrator` → `logic` → `observer` → `model` です。\
+依存の向きは `transport` → `orchestrator` / `room` → `logic` → `observer` → `model` です。\
 `model` は他のどのパッケージにも依存せず、`observer` は `model` のみに依存します。
+
+## ポートの分離
+
+`server.web.enable` が `true` の場合、1つのプロセスが2つのリスナを起動します。
+
+- `server.web_socket` (既定 8081): エージェント用の `/ws` と `/api/v1`（healthz等）。クエリ `room_id` + `seat_token` 付きの接続は待機部屋ではなく `room.Manager` の席に割り当てられます。
+- `server.web` (既定 8080): 人間向けの Web UI と `/api/v1/rooms` 系のルーム API。こちらには `/ws` や `/api/v1/games` は公開しません。
+
+ルームのゲームは `matchmaking.GameManager` とは別経路で `room.Manager` が生成します。\
+ゲームイベントは専用の recorder（`room/gameRecorder`、observer実装）を介してルームの履歴に記録され、閲覧者の視点（公開・自分のAI・神視点）でフィルタして SSE で配信します。
 
 ## 起動から対戦までの流れ
 
@@ -107,9 +123,10 @@ observer や REST API へ渡す値は、内部状態へ到達できない読み�
 | 環境変数 | 用途 |
 | --- | --- |
 | `SECRET_KEY` | `server.authentication.enable` が `true` の場合のトークン検証の秘密鍵 |
-| `OPENAI_API_KEY` | `custom_profile.dynamic_profile.enable` が `true` の場合の ChatGPT の API キー |
 | `HOST` | `server.web_socket.host` の上書き |
 | `PORT` | `server.web_socket.port` の上書き |
+| `WEB_HOST` | `server.web.host` の上書き |
+| `WEB_PORT` | `server.web.port` の上書き |
 
 `HOST` と `PORT` は、設定ファイルを編集せずにコンテナ実行時のみ待ち受けアドレスを変えるためのものです。\
 未設定の場合は設定ファイルの値が使われます。

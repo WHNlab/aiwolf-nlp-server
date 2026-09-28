@@ -1,0 +1,438 @@
+package transport
+
+import (
+	"io"
+	"io/fs"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+
+	"github.com/aiwolfdial/aiwolf-nlp-server/room"
+	"github.com/aiwolfdial/aiwolf-nlp-server/web"
+	"github.com/gin-gonic/gin"
+)
+
+const sessionCookieName = "aiwolf_session"
+
+// buildWebRouter は人間向けWeb UI・ルームAPIを配信するルータ。
+// AI用の /ws はここに置かず、web_socket ポート側のルータだけが持つ。
+func (s *Server) buildWebRouter() *gin.Engine {
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.Use(func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+		c.Next()
+	})
+
+	staticFS, err := fs.Sub(web.Static, "static")
+	if err == nil {
+		router.GET("/", func(c *gin.Context) { s.serveStatic(c, staticFS, "index.html") })
+		router.GET("/app", func(c *gin.Context) { s.serveStatic(c, staticFS, "index.html") })
+		router.GET("/rooms/new", func(c *gin.Context) { s.serveStatic(c, staticFS, "index.html") })
+		router.GET("/rooms/:id", func(c *gin.Context) { s.serveStatic(c, staticFS, "index.html") })
+		router.GET("/static/*path", func(c *gin.Context) {
+			s.serveStatic(c, staticFS, strings.TrimPrefix(c.Param("path"), "/"))
+		})
+	}
+
+	api := router.Group("/api/v1")
+	api.GET("/healthz", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "version": Version.Version})
+	})
+	api.GET("/room-presets", s.handleRoomPresets)
+
+	rooms := api.Group("/rooms")
+	rooms.POST("", s.handleCreateRoom)
+	rooms.POST("/:id/join", s.checkOrigin(), s.handleJoinRoom)
+	rooms.POST("/:id/leave", s.checkOrigin(), s.handleLeaveRoom)
+	rooms.POST("/:id/close", s.checkOrigin(), s.handleCloseRoom)
+	rooms.POST("/:id/start", s.checkOrigin(), s.handleStartRoom)
+	rooms.POST("/:id/claim", s.checkOrigin(), s.handleClaimSeat)
+	rooms.POST("/:id/consultations", s.checkOrigin(), s.handleSendAdvice)
+	rooms.GET("/:id/consultations", s.handleListConsultations)
+	rooms.GET("/:id/invite", s.handleAgentInvite)
+	rooms.GET("/:id", s.handleGetRoom)
+	rooms.GET("/:id/history", s.handleRoomHistory)
+	rooms.GET("/:id/events", s.handleRoomEvents)
+	return router
+}
+
+// serveStatic はSPAの静的ファイルを返す。見つからなければindex.htmlにフォールバックしない
+// （API/静的以外のパスは404）。
+func (s *Server) serveStatic(c *gin.Context, fsys fs.FS, path string) {
+	if path == "" || path == "/" {
+		path = "index.html"
+	}
+	data, err := fs.ReadFile(fsys, path)
+	if err != nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	// Content-Typeは拡張子で決める。embedの自動判定は未対応。
+	switch {
+	case strings.HasSuffix(path, ".html"):
+		c.Data(http.StatusOK, "text/html; charset=utf-8", data)
+	case strings.HasSuffix(path, ".css"):
+		c.Data(http.StatusOK, "text/css; charset=utf-8", data)
+	case strings.HasSuffix(path, ".js"):
+		c.Data(http.StatusOK, "text/javascript; charset=utf-8", data)
+	case strings.HasSuffix(path, ".svg"):
+		c.Data(http.StatusOK, "image/svg+xml", data)
+	default:
+		c.Data(http.StatusOK, "application/octet-stream", data)
+	}
+}
+
+// checkOrigin は同一オリジン確認を行う。Webの更新APIだけに適用する。
+func (s *Server) checkOrigin() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		origin := c.GetHeader("Origin")
+		if origin == "" {
+			c.Next()
+			return
+		}
+		// OriginのauthorityとリクエストHostが一致することだけを認める。
+		// 部分一致だと evil.example.com:8080 のような別オリジンを通してしまう。
+		u, err := url.Parse(origin)
+		if err != nil || !strings.EqualFold(u.Host, c.Request.Host) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "origin mismatch"})
+			return
+		}
+		c.Next()
+	}
+}
+
+// ---- セッション ----
+
+func (s *Server) session(c *gin.Context) (*room.Session, bool) {
+	if s.roomManager == nil {
+		return nil, false
+	}
+	token, _ := c.Cookie(sessionCookieName)
+	sess, fresh := s.roomManager.GetOrCreateSession(token)
+	if fresh {
+		// 発行済みなら毎回Cookieを書き直す。SSEの初回接続にも乗る。
+		s.setSessionCookie(c, sess)
+	}
+	return sess, fresh
+}
+
+func (s *Server) setSessionCookie(c *gin.Context, sess *room.Session) {
+	secure := c.Request.TLS != nil
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    sess.Token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func (s *Server) roomParam(c *gin.Context) *room.Room {
+	if s.roomManager == nil {
+		return nil
+	}
+	return s.roomManager.GetRoom(c.Param("id"))
+}
+
+func jsonError(c *gin.Context, err error) {
+	code := http.StatusBadRequest
+	switch err {
+	case room.ErrRoomNotFound:
+		code = http.StatusNotFound
+	case room.ErrNotHost, room.ErrNotAllowed, room.ErrSeatNotClaimable:
+		code = http.StatusForbidden
+	case room.ErrRoomFull, room.ErrAlreadyStarted:
+		code = http.StatusConflict
+	case room.ErrInvalidPhrase, room.ErrInvalidToken:
+		code = http.StatusUnauthorized
+	case room.ErrNotReady:
+		code = http.StatusConflict
+	}
+	c.JSON(code, gin.H{"error": err.Error()})
+}
+
+// ---- ハンドラ ----
+
+func (s *Server) handleRoomPresets(c *gin.Context) {
+	// 対応している人数を設定ファイルのrolesキーから導く。
+	counts := []int{}
+	for n := range s.config.Logic.Roles {
+		counts = append(counts, n)
+	}
+	// 小さい順に返す。
+	for i := 0; i < len(counts); i++ {
+		for j := i + 1; j < len(counts); j++ {
+			if counts[j] < counts[i] {
+				counts[i], counts[j] = counts[j], counts[i]
+			}
+		}
+	}
+	presets := []map[string]any{}
+	for _, n := range counts {
+		roles := map[string]int{}
+		for name, num := range s.config.Logic.Roles[n] {
+			roles[name] = num
+		}
+		mode := "turn"
+		if s.config.Game.Talk.Duration != nil {
+			mode = "freeform"
+		}
+		presets = append(presets, map[string]any{
+			"agent_count": n,
+			"roles":       roles,
+			"mode":        mode,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"presets": presets})
+}
+
+func (s *Server) handleCreateRoom(c *gin.Context) {
+	sess, fresh := s.session(c)
+	var body struct {
+		RoomName   string `json:"room_name"`
+		UserName   string `json:"user_name"`
+		AgentCount int    `json:"agent_count"`
+		Mode       string `json:"mode"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "不正なリクエストです"})
+		return
+	}
+	r, err := s.roomManager.CreateRoom(sess, room.CreateParams{
+		RoomName:   body.RoomName,
+		UserName:   body.UserName,
+		AgentCount: body.AgentCount,
+		Mode:       body.Mode,
+	})
+	if err != nil {
+		jsonError(c, err)
+		return
+	}
+	if fresh {
+		s.setSessionCookie(c, sess)
+	}
+	c.JSON(http.StatusOK, r.Project(sess))
+}
+
+func (s *Server) handleJoinRoom(c *gin.Context) {
+	r := s.roomParam(c)
+	if r == nil {
+		jsonError(c, room.ErrRoomNotFound)
+		return
+	}
+	sess, _ := s.session(c)
+	s.setSessionCookie(c, sess)
+	var body struct {
+		Name string `json:"name"`
+		Mode string `json:"mode"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "不正なリクエストです"})
+		return
+	}
+	if _, err := s.roomManager.Join(r, sess, body.Name, body.Mode); err != nil {
+		jsonError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, r.Project(sess))
+}
+
+func (s *Server) handleLeaveRoom(c *gin.Context) {
+	r := s.roomParam(c)
+	if r == nil {
+		jsonError(c, room.ErrRoomNotFound)
+		return
+	}
+	sess, _ := s.session(c)
+	if err := s.roomManager.Leave(r, sess); err != nil {
+		jsonError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (s *Server) handleCloseRoom(c *gin.Context) {
+	r := s.roomParam(c)
+	if r == nil {
+		jsonError(c, room.ErrRoomNotFound)
+		return
+	}
+	sess, _ := s.session(c)
+	if err := s.roomManager.Close(r, sess); err != nil {
+		jsonError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (s *Server) handleStartRoom(c *gin.Context) {
+	r := s.roomParam(c)
+	if r == nil {
+		jsonError(c, room.ErrRoomNotFound)
+		return
+	}
+	sess, _ := s.session(c)
+	if err := s.roomManager.Start(r, sess); err != nil {
+		jsonError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, r.Project(sess))
+}
+
+func (s *Server) handleGetRoom(c *gin.Context) {
+	r := s.roomParam(c)
+	if r == nil {
+		jsonError(c, room.ErrRoomNotFound)
+		return
+	}
+	sess, _ := s.session(c)
+	out := r.Project(sess)
+	out["private_agent"] = r.PrivateView(sess)
+	c.JSON(http.StatusOK, out)
+}
+
+func (s *Server) handleRoomHistory(c *gin.Context) {
+	r := s.roomParam(c)
+	if r == nil {
+		jsonError(c, room.ErrRoomNotFound)
+		return
+	}
+	sess, _ := s.session(c)
+	cursor := 0
+	if v := c.Query("cursor"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cursor = n
+		}
+	}
+	events, seq := s.roomManager.History(r, sess, cursor)
+	c.JSON(http.StatusOK, gin.H{"events": events, "cursor": seq})
+}
+
+func (s *Server) handleRoomEvents(c *gin.Context) {
+	r := s.roomParam(c)
+	if r == nil {
+		jsonError(c, room.ErrRoomNotFound)
+		return
+	}
+	sess, _ := s.session(c)
+	ch, cancel, ok := s.roomManager.Subscribe(r, sess)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "room not found"})
+		return
+	}
+	defer cancel()
+	c.Stream(func(w io.Writer) bool {
+		select {
+		case payload, ok := <-ch:
+			if !ok {
+				return false
+			}
+			c.SSEvent("room", string(payload))
+			return true
+		case <-c.Request.Context().Done():
+			return false
+		}
+	})
+}
+
+func (s *Server) handleClaimSeat(c *gin.Context) {
+	r := s.roomParam(c)
+	if r == nil {
+		jsonError(c, room.ErrRoomNotFound)
+		return
+	}
+	sess, _ := s.session(c)
+	var body struct {
+		Phrase string `json:"phrase"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "不正なリクエストです"})
+		return
+	}
+	if err := s.roomManager.Claim(r, sess, body.Phrase); err != nil {
+		jsonError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, r.Project(sess))
+}
+
+func (s *Server) handleSendAdvice(c *gin.Context) {
+	r := s.roomParam(c)
+	if r == nil {
+		jsonError(c, room.ErrRoomNotFound)
+		return
+	}
+	sess, _ := s.session(c)
+	var body struct {
+		Text string `json:"text"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "不正なリクエストです"})
+		return
+	}
+	if err := s.roomManager.SendAdvice(r, sess, body.Text); err != nil {
+		jsonError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (s *Server) handleListConsultations(c *gin.Context) {
+	r := s.roomParam(c)
+	if r == nil {
+		jsonError(c, room.ErrRoomNotFound)
+		return
+	}
+	sess, _ := s.session(c)
+	events, _ := s.roomManager.History(r, sess, 0)
+	out := []map[string]any{}
+	for _, e := range events {
+		if e.Type != "owner_advice" && e.Type != "owner_note" {
+			continue
+		}
+		out = append(out, map[string]any{
+			"seq": e.Seq, "type": e.Type, "text": e.Text, "day": e.Day, "at": e.CreatedAt,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"consultations": out})
+}
+
+// handleAgentInvite は自分の席にAIを接続するためのURLと案内を返す。
+// 席トークンは秘密情報なので所有者以外には返さない。
+func (s *Server) handleAgentInvite(c *gin.Context) {
+	r := s.roomParam(c)
+	if r == nil {
+		jsonError(c, room.ErrRoomNotFound)
+		return
+	}
+	sess, _ := s.session(c)
+	wsScheme := "ws"
+	if c.Request.TLS != nil {
+		wsScheme = "wss"
+	}
+	// WSは別ポートで待ち受ける。ブラウザのHostからホスト名を取り、ポートだけ差し替える。
+	wsHost := c.Request.Host
+	if i := strings.LastIndex(wsHost, ":"); i >= 0 {
+		wsHost = wsHost[:i]
+	}
+	wsPort := s.config.Server.WebSocket.Port
+	if wsHost == "" {
+		wsHost = s.config.Server.WebSocket.Host
+	}
+	invite := r.InviteFor(sess, wsScheme+"://"+wsHost+":"+strconv.Itoa(wsPort)+"/ws")
+	if invite == nil {
+		jsonError(c, room.ErrSeatNotClaimable)
+		return
+	}
+	c.JSON(http.StatusOK, invite)
+}

@@ -28,6 +28,11 @@ func (s *Server) registerAPI(router *gin.Engine) {
 		c.JSON(http.StatusOK, s.config.RulesetInfo())
 	})
 
+	// Web有効時、旧観戦APIは役職を含む生データを返すため公開しない。
+	// ルームAPI側で閲覧権限ごとの投影に絞る。
+	if s.config.Server.Web.Enable {
+		return
+	}
 	games := api.Group("/games")
 	if s.config.Server.Authentication.Enable {
 		games.Use(receiverAuthMiddleware())
