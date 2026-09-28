@@ -64,6 +64,8 @@ SSE sends a `room` notice when progress changes, even if the history `seq` does 
 
 The viewpoint (`viewer.view_mode`) is one of `public` / `agent` / `omniscient`.+After the game ends or is aborted, and for viewers whose own agent has died, the viewpoint becomes `omniscient` and all information including roles and attack votes is visible.
 
+When execution or attack confirms a death, the seat status, owner perspective, and advice permission update with that event. A successfully guarded agent remains alive.
+
 ## Endpoint Details
 
 ### GET /api/v1/healthz

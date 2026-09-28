@@ -117,3 +117,31 @@ func TestHistoryFullRefetchIncludesVoteAfterNextDayDisclosure(t *testing.T) {
 		t.Fatalf("full refetch did not reveal the previous-day vote: history=%#v cursor=%d", history, cursor)
 	}
 }
+
+func TestConfirmedDeathImmediatelyChangesOwnerPerspective(t *testing.T) {
+	for _, kind := range []string{"execute", "attack", "guarded"} {
+		t.Run(kind, func(t *testing.T) {
+			owner := &Session{UserID: "owner"}
+			seat := &Seat{ID: "seat-1", UserID: "owner", AgentIdx: 1, Claimed: true, Alive: true, Role: "VILLAGER"}
+			r := &Room{Status: StatusRunning, Seats: []*Seat{seat}, subs: map[int]*subscriber{}}
+			recorder := &gameRecorder{manager: &Manager{}, room: r}
+			agent := &model.AgentView{Idx: 1, Role: model.R_VILLAGER}
+			if kind == "execute" {
+				recorder.OnExecute("game", 2, agent, model.GameState{})
+			} else {
+				recorder.OnAttack("game", 2, agent, kind == "guarded", model.GameState{})
+			}
+			viewer := r.Project(owner)["viewer"].(map[string]any)
+			if kind == "guarded" {
+				if viewer["view_mode"] != string(ViewAgent) || viewer["can_consult"] != true {
+					t.Fatalf("guarded player treated as dead: %#v", viewer)
+				}
+			} else if viewer["view_mode"] != string(ViewOmniscient) || viewer["can_consult"] != false {
+				t.Fatalf("death left stale owner permissions: %#v", viewer)
+			}
+			if r.Project(nil)["viewer"].(map[string]any)["view_mode"] != string(ViewPublic) {
+				t.Fatal("another player's death exposed the omniscient view")
+			}
+		})
+	}
+}

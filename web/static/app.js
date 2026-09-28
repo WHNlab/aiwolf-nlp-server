@@ -1,3 +1,6 @@
+import { stageHtml } from './tabletop.js?v=__ASSET_VERSION__';
+import { HistoryDrawer } from './history.js?v=__ASSET_VERSION__';
+
 // AI人狼バトル！ SPA — ルーム作成・待機・観戦・自分のAI視点
 const $ = (sel, el = document) => el.querySelector(sel);
 const app = $('#app');
@@ -55,6 +58,8 @@ async function copyTextarea(textarea, successMessage) {
 // ---- ルーティング ----
 function route() {
   stopUpdates();
+  destroyMatch();
+  app.onclick = null;
   const h = location.hash || '#/';
   const m = h.match(/^#\/rooms\/([A-Za-z0-9]+)/);
   if (m) return renderRoom(m[1]);
@@ -185,7 +190,6 @@ async function renderRoom(roomId) {
   if (!data.viewer.joined && data.status === 'waiting') return renderJoin(data);
   try { await refreshHistory(roomId, 0); } catch (_) { /* 通知の再接続時に再取得する */ }
   renderRoomView(data);
-  scrollToLatest();
   subscribeEvents(roomId);
 }
 
@@ -230,8 +234,7 @@ function renderJoin(data) {
       state.room = out;
       try { await refreshHistory(out.room_id, 0); } catch (_) { /* 通知の再接続時に再取得する */ }
       renderRoomView(out);
-      scrollToLatest();
-      subscribeEvents(out.room_id);
+          subscribeEvents(out.room_id);
     } catch (ex) { err.textContent = ex.message; err.hidden = false; }
   };
 }
@@ -245,10 +248,8 @@ async function refreshHistory(roomId, cursor, current = null) {
   return (d.events || []).length;
 }
 
-function renderRoomView(data, hasNewEvents = false) {
-  const previousTimeline = $('#timeline');
-  const followLatest = !previousTimeline || isLatestVisible();
-  const previousScroll = window.scrollY;
+function renderRoomView(data, hasNewEvents = false, previousRoom = null) {
+  if (!['waiting', 'starting'].includes(data.status)) return renderMatch(data, hasNewEvents, previousRoom);
   const mobileView = $('#room-grid')?.className || 'room-grid';
   const inviteOpen = $('#invite-detail') && !$('#invite-detail').hidden;
   const inviteText = $('#invite-text')?.value || '';
@@ -260,9 +261,7 @@ function renderRoomView(data, hasNewEvents = false) {
   const v = data.viewer;
   const leftCol = seatListHtml(data);
   const rightCol = rightPanelHtml(data);
-  let center = '';
-  if (status === 'waiting' || status === 'starting') center = lobbyHtml(data);
-  else center = gameHtml(data);
+  const center = lobbyHtml(data);
   app.innerHTML = `
     <div class="page">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px">
@@ -290,8 +289,6 @@ function renderRoomView(data, hasNewEvents = false) {
   if ($('#consult-form textarea')) $('#consult-form textarea').value = consultText;
   if ($('#claim-form input')) $('#claim-form input').value = claimText;
   bindRoomEvents(data);
-  renderTimeline(followLatest, hasNewEvents);
-  if (previousTimeline && !followLatest) window.scrollTo(0, previousScroll);
   if (focusedField) $(focusedField === 'consult' ? '#consult-form textarea' : '#claim-form input')?.focus({ preventScroll: true });
 }
 
@@ -311,7 +308,7 @@ function seatListHtml(data) {
       <span class="seat-dot"></span>
       <span class="seat-name">${escapeHtml(name)}</span>
       <span class="seat-sub">${escapeHtml(sub)}${s.claimed ? ' 🔓' : ''}</span>
-      <span class="seat-role ${s.is_mine ? 'mine' : ''}">${escapeHtml(s.role)}</span>
+      <span class="seat-role ${s.is_mine ? 'mine' : ''}">${escapeHtml(roleLabel(s.role))}</span>
     </li>`;
   }).join('');
   return `<div class="paper panel"><h3>参加者 ${data.connected} / ${data.agent_count}</h3>
@@ -330,7 +327,7 @@ function rightPanelHtml(data) {
       <h3>🔑 自分のAIの視点をひらく</h3>
       <p class="field-hint">ゲーム開始後、あなたのAIが個別に伝えたキーフレーズを入力してください。</p>
       <form id="claim-form">
-        <label class="field"><input type="password" name="phrase" autocomplete="off" placeholder="キーフレーズ" required></label>
+        <label class="field"><input type="password" name="phrase" autocomplete="off" placeholder="キーフレーズ" aria-label="キーフレーズ" required></label>
         <div id="claim-error" class="field-error" hidden></div>
         <button class="btn btn--primary" type="submit" style="width:100%">視点をひらく</button>
       </form>
@@ -338,36 +335,36 @@ function rightPanelHtml(data) {
   }
   if (p) {
     const k = p.knowledge || {};
-    let know = `<p class="field-hint">役職: <strong>${escapeHtml(p.role)}</strong> / ${p.alive ? '生存' : '死亡'}</p>`;
+    let know = `<span class="owner-eyebrow">YOUR AGENT</span><span class="own-role">${escapeHtml(roleLabel(p.role))}</span><p class="field-hint">${p.alive ? 'あなたのAIは生存しています' : 'あなたのAIは死亡しました。神視点で観戦できます。'}</p>`;
     if (k.werewolf_mates && k.werewolf_mates.length) {
       know += `<p class="field-hint">人狼の仲間: ${k.werewolf_mates.map(escapeHtml).join('、')}</p>`;
     }
     if (k.divine_results && k.divine_results.length) {
       know += '<p class="field-hint">占い結果:</p>' + k.divine_results.map(r =>
-        `<div class="paper-inset" style="padding:6px 10px;margin-bottom:4px;font-size:0.85rem">${r.day}日目 ${escapeHtml(r.target || '?')} → ${escapeHtml(r.result)}</div>`).join('');
+        `<div class="paper-inset" style="padding:6px 10px;margin-bottom:4px;font-size:0.85rem">${r.day}日目 ${escapeHtml(r.target || '?')} → ${escapeHtml(r.result === 'HUMAN' ? '人狼ではない' : r.result === 'WEREWOLF' ? '人狼' : r.result)}</div>`).join('');
     }
     if (k.medium_results && k.medium_results.length) {
       know += '<p class="field-hint">霊媒結果:</p>' + k.medium_results.map(r =>
-        `<div class="paper-inset" style="padding:6px 10px;margin-bottom:4px;font-size:0.85rem">${r.day}日目 ${escapeHtml(r.target || '?')} → ${escapeHtml(r.result)}</div>`).join('');
+        `<div class="paper-inset" style="padding:6px 10px;margin-bottom:4px;font-size:0.85rem">${r.day}日目 ${escapeHtml(r.target || '?')} → ${escapeHtml(r.result === 'HUMAN' ? '人狼ではない' : r.result === 'WEREWOLF' ? '人狼' : r.result)}</div>`).join('');
     }
     html += `<div class="paper panel"><h3>自分のAI</h3>${know}</div>`;
   }
-  if (v.can_consult) {
+  if (p || v.can_consult) {
     html += `<div class="paper panel">
       <h3>自分のAIに相談</h3>
       <p class="field-hint">あなたのAIにだけ届きます。ゲームの発言・投票はAIが行います。</p>
       <div class="consult-log" id="consult-log"></div>
-      <form id="consult-form" style="margin-top:10px">
-        <textarea name="text" rows="3" maxlength="1000" placeholder="助言を書く…"></textarea>
+      ${v.can_consult ? `<form id="consult-form" style="margin-top:10px">
+        <textarea name="text" rows="3" maxlength="1000" placeholder="助言を書く…" aria-label="自分のAIへの助言"></textarea>
         <button class="btn btn--small btn--primary" type="submit" style="margin-top:6px">AIに送る</button>
         <p class="field-hint">送信済みの助言は次の通信でAIへ届きます。</p>
-      </form>
+      </form>` : '<p class="field-hint">現在は助言を送信できません。</p>'}
     </div>`;
   }
   if (data.status === 'waiting' || data.status === 'starting') {
     html += inviteHtml(data);
   }
-  return html || '<div class="paper panel"><p class="field-hint">観戦中</p></div>';
+  return html || `<div class="paper panel"><span class="owner-eyebrow">SPECTATOR</span><h3>${data.viewer.view_mode === 'omniscient' ? '神視点で観戦中' : '公開視点で観戦中'}</h3><p class="field-hint">席を選ぶと参加者の詳細、履歴からこれまでの会話を確認できます。</p></div>`;
 }
 
 function inviteHtml(data) {
@@ -397,64 +394,6 @@ function lobbyHtml(data) {
   </div>`;
 }
 
-function gameHtml(data) {
-  return `<div class="paper panel">
-    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-      <span class="chip">公開会話</span>
-      ${data.viewer.view_mode === 'omniscient' ? '<span class="chip">全情報</span>' : ''}
-    </div>
-    <div class="timeline" id="timeline"></div>
-    <div id="new-msg-bar" hidden>
-      <button class="btn btn--small" id="btn-jump">新しい発言 ↓</button>
-    </div>
-    <div id="result-area"></div>
-  </div>`;
-}
-
-function isLatestVisible() {
-  const tl = $('#timeline');
-  if (!tl || !tl.getClientRects().length) return false;
-  const last = tl.lastElementChild;
-  if (!last) return true;
-  const rect = last.getBoundingClientRect();
-  return rect.bottom >= 64 && rect.top <= window.innerHeight && rect.bottom <= window.innerHeight + 100;
-}
-
-function scrollToLatest() {
-  const tl = $('#timeline');
-  if (!tl || !state.events.length) return;
-  if (!tl.getClientRects().length) {
-    // スマホで別タブを見ているときも、新着ボタンから会話へ移動できる。
-    const grid = $('#room-grid');
-    if (grid?.classList.contains('mobile-participants') || grid?.classList.contains('mobile-ai')) {
-      grid.classList.remove('mobile-participants', 'mobile-ai');
-      requestAnimationFrame(scrollToLatest);
-    }
-    return;
-  }
-  tl.lastElementChild?.scrollIntoView({ block: 'end', behavior: 'smooth' });
-  if ($('#new-msg-bar')) $('#new-msg-bar').hidden = true;
-}
-
-function renderTimeline(followLatest = isLatestVisible(), hasNewEvents = false) {
-  const tl = $('#timeline');
-  if (!tl) return;
-  let html = '';
-  let lastDay = -1;
-  for (const e of state.events) {
-    if (e.day !== lastDay) {
-      lastDay = e.day;
-      html += `<div class="event-day"><span class="sticky ${isNightGuess(e) ? 'night' : ''}">${e.day}日目</span></div>`;
-    }
-    html += eventHtml(e);
-  }
-  tl.innerHTML = html || '<div class="empty">ゲームが始まると、ここに会話が記録されます</div>';
-  if (followLatest) requestAnimationFrame(scrollToLatest);
-  else if (hasNewEvents && $('#new-msg-bar')) $('#new-msg-bar').hidden = false;
-}
-
-function isNightGuess(e) { return e.type === 'day' && e.day > 0 && false; }
-
 function eventHtml(e) {
   const who = seatNameOf(e.from_idx);
   const to = seatNameOf(e.to_idx);
@@ -473,7 +412,8 @@ function eventHtml(e) {
     case 'medium_result': return `<div class="event-sys">🕯 霊媒: ${escapeHtml(to)} → ${escapeHtml(e.result)}</div>`;
     case 'guard': return `<div class="event-sys">🛡 護衛: ${escapeHtml(who)} → ${escapeHtml(to)}</div>`;
     case 'game_start': return `<div class="event-sys">🚩 ${escapeHtml(e.text)}</div>`;
-    case 'game_end': return `<div class="event-sys">🏁 ${escapeHtml(e.text)} ${e.team || ''}</div>`;
+    case 'day': return '';
+    case 'game_end': return `<div class="event-sys">🏁 ${escapeHtml(e.text)} ${escapeHtml(e.team || '')}</div>`;
     case 'owner_advice': return `<div class="consult-msg mine" style="align-self:stretch">${escapeHtml(e.text)}<div class="meta">あなた → AI</div></div>`;
     case 'owner_note': return `<div class="consult-msg ai" style="align-self:stretch">${escapeHtml(e.text)}<div class="meta">AI → あなた</div></div>`;
     default: return '';
@@ -519,7 +459,8 @@ function bindRoomEvents(data) {
     if (!t) return;
     try {
       await api(`/api/v1/rooms/${data.room_id}/consultations`, { method: 'POST', body: JSON.stringify({ text: t }) });
-      cf.text.value = '';
+      const currentField = $('#consult-form textarea');
+      if (state.room?.room_id === data.room_id && currentField?.value.trim() === t) currentField.value = '';
       toast('AIへ送信しました');
     } catch (ex) { toast(ex.message); }
   };
@@ -547,8 +488,6 @@ function bindRoomEvents(data) {
       if (b.dataset.tab === 'ai') g.classList.add('mobile-ai');
     };
   });
-  const jump = $('#btn-jump');
-  if (jump) jump.onclick = scrollToLatest;
 }
 
 function stopUpdates() {
@@ -562,7 +501,7 @@ function stopUpdates() {
 function roomViewKey(data) {
   if (!data) return '';
   return JSON.stringify([data.name, data.status, data.connected, data.day, data.seats,
-    data.viewer, data.private_agent, data.roles, data.win_side, data.abort_reason]);
+    data.viewer, data.private_agent, data.roles, data.win_side, data.abort_reason, data.progress]);
 }
 
 async function syncRoom(current) {
@@ -574,18 +513,21 @@ async function syncRoom(current) {
       current.queued = false;
       const fresh = await api('/api/v1/rooms/' + current.roomId);
       if (!current.active || state.room?.room_id !== current.roomId) return;
-      const viewChanged = state.room.viewer.view_mode !== fresh.viewer.view_mode;
+      const viewChanged = state.room.viewer.view_mode !== fresh.viewer.view_mode || state.room.viewer.own_seat !== fresh.viewer.own_seat || state.room.viewer.user_id !== fresh.viewer.user_id || state.room.day !== fresh.day || state.room.status !== fresh.status;
       const changed = roomViewKey(state.room) !== roomViewKey(fresh);
       let newEvents = 0;
       if (viewChanged || fresh.cursor > state.cursor) {
         newEvents = await refreshHistory(current.roomId, viewChanged ? 0 : state.cursor, current);
         if (!current.active) return;
       }
+      const previousRoom = state.room;
       state.room = fresh;
+      if (current.es.readyState === EventSource.OPEN) setConnection(true, false);
       headerRoom.textContent = fresh.name;
       updateViewBadge(fresh.viewer);
-      if (changed) renderRoomView(fresh, newEvents > 0);
-      else if (newEvents) renderTimeline(isLatestVisible(), true);
+      if (changed) renderRoomView(fresh, newEvents > 0, previousRoom);
+      else if (newEvents && matchUI) renderMatch(fresh, true);
+      current.catchingUp = false;
       if (['finished', 'aborted', 'closed'].includes(fresh.status)) {
         stopUpdates();
         connBadge.hidden = true;
@@ -593,6 +535,7 @@ async function syncRoom(current) {
       }
     } while (current.queued);
   } catch (_) {
+    setConnection(false);
     // SSEの再接続または定期確認で再試行する。既存の表示は残す。
   } finally {
     current.syncing = false;
@@ -601,31 +544,209 @@ async function syncRoom(current) {
 
 function subscribeEvents(roomId) {
   stopUpdates();
-  const current = { roomId, active: true, syncing: false, queued: false, es: null, pollTimer: null };
+  const current = { roomId, catchingUp: true, active: true, syncing: false, queued: false, es: null, pollTimer: null };
   feed = current;
   current.es = new EventSource(`/api/v1/rooms/${roomId}/events`);
   connBadge.hidden = false;
-  connBadge.textContent = '接続中';
-  connBadge.classList.remove('off');
+  setConnection(true);
   current.es.addEventListener('room', () => syncRoom(current));
   current.es.onopen = () => {
     if (!current.active) return;
-    connBadge.textContent = '接続中';
-    connBadge.classList.remove('off');
+    current.catchingUp = true;
+    setConnection(true);
     syncRoom(current);
   };
   current.es.onerror = () => {
     if (!current.active) return;
-    connBadge.textContent = '再接続中';
-    connBadge.classList.add('off');
+    current.catchingUp = true;
+    setConnection(false);
   };
   // SSEが中継で滞留した場合にも履歴カーソルから追いつく。
   current.pollTimer = setInterval(() => syncRoom(current), 10000);
+}
+
+// ---- テーブル観戦 ----
+let matchUI = null;
+const roleLabel = role => ({ VILLAGER: '村人', SEER: '占い師', MEDIUM: '霊媒師', BODYGUARD: '狩人', WEREWOLF: '人狼', POSSESSED: '狂人', ANY: '未定' }[role] || role || '非公開');
+
+function destroyMatch() {
+  if (!matchUI) return;
+  matchUI.history.destroy();
+  matchUI.sheet.close();
+  matchUI.sheet.remove();
+  matchUI = null;
+}
+
+function renderMatch(data, hasNewEvents = false, previousRoom = null) {
+  document.body.dataset.page = 'match';
+  if (!matchUI || matchUI.roomId !== data.room_id) {
+    destroyMatch();
+    app.innerHTML = `<div class="match-page"><div class="match-heading"><h1>${escapeHtml(data.name)}</h1><button class="btn btn--small" data-action="menu">ルーム ⋯</button></div>
+      <div class="match-grid"><section class="match-main" aria-label="試合のテーブル"><div id="game-stage"></div><div id="current-speech"></div><div id="match-result"></div></section><aside class="owner-dock"><div id="owner-panel"></div></aside></div>
+      <nav class="match-actions" aria-label="観戦メニュー"><button class="btn btn--primary" data-action="history">▤ 履歴をひらく</button><button class="btn owner-open" data-action="owner">自分のAI</button></nav></div>`;
+    const sheet = document.createElement('dialog');
+    sheet.className = 'game-sheet';
+    sheet.setAttribute('aria-labelledby', 'game-sheet-title');
+    sheet.innerHTML = `<header class="sheet-heading"><h2 id="game-sheet-title"></h2><button class="btn sheet-close">閉じる ×</button></header><div class="sheet-body"></div>`;
+    document.body.append(sheet);
+    const history = new HistoryDrawer({ renderEvent: eventHtml, seatName: seatNameOf });
+    matchUI = { roomId: data.room_id, history, sheet, ownerKey: '', stageKey: '', speechKey: '', lastTalk: null, status: data.status, channel: 'talk', panel: '', trigger: null, previousRoom };
+    sheet.querySelector('.sheet-close').onclick = () => sheet.close();
+    sheet.addEventListener('close', () => {
+      if (!matchUI || matchUI.sheet !== sheet) return;
+      const owner = sheet.querySelector('#owner-panel');
+      if (owner) $('.owner-dock')?.append(owner);
+      matchUI.panel = '';
+      if (matchUI.trigger?.isConnected) matchUI.trigger.focus({ preventScroll: true });
+    });
+    app.onclick = handleMatchClick;
+  }
+  const ui = matchUI;
+  const latest = state.events.findLast(e => e.type === 'talk');
+  const online = !document.body.classList.contains('connection-lost');
+  const stageKey = JSON.stringify([data.seats, data.progress, data.status, data.day, data.viewer.own_seat, latest?.seq, online]);
+  if (ui.stageKey !== stageKey) {
+    const activeSeat = document.activeElement?.dataset.seatId;
+    const phaseChanged = ui.previousRoom?.progress?.phase !== data.progress?.phase;
+    const animate = (hasNewEvents || phaseChanged) && !!ui.previousRoom && !document.hidden && online && !feed?.catchingUp;
+    const talkChanged = ui.lastTalk !== null && latest?.seq !== ui.lastTalk;
+    $('#game-stage').innerHTML = stageHtml(data, state.events, { connected: online, animate, talkChanged, previousRoom: ui.previousRoom });
+    if (activeSeat) [...$('#game-stage').querySelectorAll('[data-seat-id]')].find(el => el.dataset.seatId === activeSeat)?.focus({ preventScroll: true });
+    ui.stageKey = stageKey;
+  }
+  ui.lastTalk = latest?.seq ?? null;
+  ui.previousRoom = data;
+  renderCurrentSpeech();
+  updateOwnerPanel(data);
+  ui.history.update(state.events, data);
+  if (ui.panel === 'seat') renderSeatDetail(ui.seatId);
+  if (ui.panel === 'menu') renderRoomMenu();
+  if (ui.status !== data.status || !ui.resultRendered) {
+    const finished = ['finished', 'aborted', 'closed'].includes(data.status);
+    $('#match-result').innerHTML = finished ? `<section class="paper match-result ${ui.status === 'running' && data.status === 'finished' ? 'is-new' : ''}"><span class="speech-eyebrow">${data.status === 'finished' ? 'GAME SET' : 'ROOM CLOSED'}</span><h2>${data.status === 'finished' ? `${escapeHtml(data.win_side === 'VILLAGER' ? '村人陣営' : data.win_side === 'WEREWOLF' ? '人狼陣営' : data.win_side || '')}の勝利！` : statusLabel(data.status)}</h2><p>${escapeHtml(data.abort_reason || 'テーブルの席を選んで役職を確認したり、履歴を読み返せます。')}</p><a class="btn" href="#/">新しい部屋へ</a></section>` : '';
+    ui.resultRendered = true;
+  }
+  ui.status = data.status;
+}
+
+function renderCurrentSpeech() {
+  const ui = matchUI;
+  const hasWhisper = state.events.some(e => e.type === 'whisper');
+  if (!hasWhisper) ui.channel = 'talk';
+  const latest = state.events.findLast(e => e.type === ui.channel);
+  const key = JSON.stringify([latest, ui.channel, hasWhisper]);
+  if (key === ui.speechKey) return;
+  ui.speechKey = key;
+  const focus = document.activeElement?.dataset.action;
+  $('#current-speech').innerHTML = `<section class="paper current-speech" aria-label="最新の発言"><div class="speech-heading"><span class="speech-number">${latest ? String(latest.from_idx).padStart(2, '0') : '…'}</span><div><span class="speech-eyebrow">${ui.channel === 'whisper' ? '人狼だけの会話' : 'LATEST TALK · 最新の公開発言'}</span><h2>${latest ? escapeHtml(seatNameOf(latest.from_idx)) : '最初の発言を待っています'}</h2></div></div><p class="speech-text">${escapeHtml(latest?.text || 'AIたちの会話が始まると、ここに届きます。')}</p><div class="speech-actions"><span class="field-hint">${latest ? `${latest.day}日目` : '発言・投票はAIが行います'}</span><div>${hasWhisper ? `<button class="btn btn--small" data-action="channel">${ui.channel === 'talk' ? '人狼の囁きへ' : '公開会話へ'}</button> ` : ''}${latest ? `<button class="btn btn--small" data-action="full-speech" data-seq="${Number(latest.seq)}">全文を読む ↗</button>` : ''}</div></div></section>`;
+  if (focus) [...$('#current-speech').querySelectorAll('[data-action]')].find(el => el.dataset.action === focus)?.focus({ preventScroll: true });
+}
+
+function updateOwnerPanel(data) {
+  const ui = matchUI;
+  const key = JSON.stringify([data.viewer, data.private_agent, data.status]);
+  if (key !== ui.ownerKey) {
+    const panel = $('#owner-panel');
+    const text = panel.querySelector('textarea')?.value || '';
+    const phrase = panel.querySelector('[name="phrase"]')?.value || '';
+    const focused = panel.contains(document.activeElement) ? document.activeElement.name : '';
+    const selection = focused ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
+    panel.innerHTML = rightPanelHtml(data);
+    if (panel.querySelector('textarea')) panel.querySelector('textarea').value = text;
+    if (panel.querySelector('[name="phrase"]')) panel.querySelector('[name="phrase"]').value = phrase;
+    bindRoomEvents(data);
+    if (focused) {
+      const field = [...panel.querySelectorAll('input, textarea')].find(el => el.name === focused);
+      field?.focus({ preventScroll: true });
+      if (field && selection) field.setSelectionRange(...selection);
+    }
+    ui.ownerKey = key;
+  }
+  const log = $('#consult-log');
+  if (log) {
+    const notes = state.events.filter(e => ['owner_advice', 'owner_note'].includes(e.type));
+    const key = JSON.stringify(notes);
+    if (log.dataset.events !== key) {
+      const follow = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+      const top = log.scrollTop;
+      log.innerHTML = notes.map(eventHtml).join('') || '<p class="field-hint">AIとの個別メッセージが届きます。</p>';
+      log.dataset.events = key;
+      log.scrollTop = follow ? log.scrollHeight : top;
+    }
+  }
+}
+
+function openGameSheet(title, panel, trigger) {
+  const ui = matchUI;
+  if (ui.sheet.open) ui.sheet.close();
+  ui.panel = panel;
+  ui.menuKey = '';
+  ui.trigger = trigger;
+  $('#game-sheet-title', ui.sheet).textContent = title;
+  $('.sheet-body', ui.sheet).replaceChildren();
+}
+
+function handleMatchClick(e) {
+  const button = e.target.closest('button');
+  if (!button || !matchUI) return;
+  const action = button.dataset.action;
+  if (button.dataset.seatId) {
+    openGameSheet('参加者', 'seat', button);
+    matchUI.seatId = button.dataset.seatId;
+    renderSeatDetail(matchUI.seatId);
+    matchUI.sheet.showModal();
+  } else if (action === 'history' || action === 'full-speech') matchUI.history.open(button, action === 'full-speech' ? Number(button.dataset.seq) : null);
+  else if (action === 'owner') {
+    openGameSheet('自分のAI', 'owner', button);
+    $('.sheet-body', matchUI.sheet).append($('#owner-panel'));
+    matchUI.sheet.showModal();
+  } else if (action === 'menu') {
+    openGameSheet('ルーム', 'menu', button);
+    renderRoomMenu();
+    matchUI.sheet.showModal();
+  } else if (action === 'channel') {
+    matchUI.channel = matchUI.channel === 'talk' ? 'whisper' : 'talk';
+    renderCurrentSpeech();
+  }
+}
+
+function renderSeatDetail(id) {
+  const seat = state.room.seats.find(s => s.seat_id === id);
+  if (!seat) return;
+  $('.sheet-body', matchUI.sheet).innerHTML = `<div class="paper panel"><span class="speech-number">${String(seat.agent_idx).padStart(2, '0')}</span><h3>${escapeHtml(seatNameOf(seat.agent_idx))}</h3><p>${seat.is_mine ? 'あなたのAI · ' : ''}${seat.alive ? '生存' : '死亡'}</p><p>参加者：${escapeHtml(seat.user_name || '—')}</p><p>チーム：${escapeHtml(seat.team_name || '—')}</p><span class="own-role">${escapeHtml(roleLabel(seat.role))}</span></div>`;
+}
+
+function renderRoomMenu() {
+  const data = state.room;
+  const key = JSON.stringify([data.name, data.seats, data.roles, data.connected]);
+  if (matchUI.menuKey === key) return;
+  matchUI.menuKey = key;
+  const body = $('.sheet-body', matchUI.sheet);
+  const focus = document.activeElement?.dataset.action;
+  const expanded = body.querySelector('details')?.open;
+  body.innerHTML = `<p><strong>${escapeHtml(data.name)}</strong></p><p class="field-hint">RoomID <code>${escapeHtml(data.room_id)}</code></p><button class="btn" data-action="share">観戦URLをコピー</button><div style="margin-top:20px">${seatListHtml(data)}</div><p><a class="btn" href="#/">トップへ戻る</a></p>`;
+  if (expanded) body.querySelector('details').open = true;
+  const share = $('[data-action="share"]', body);
+  share.onclick = async () => { try { await navigator.clipboard.writeText(location.href); toast('観戦URLをコピーしました'); } catch (_) { toast('アドレス欄のURLをコピーしてください'); } };
+  if (focus === 'share') share.focus({ preventScroll: true });
+}
+
+
+function setConnection(connected, render = true) {
+  const changed = document.body.classList.contains('connection-lost') === connected;
+  connBadge.textContent = connected ? '接続中' : '更新待ち';
+  connBadge.classList.toggle('off', !connected);
+  document.body.classList.toggle('connection-lost', !connected);
+  if (changed && render && matchUI && state.room) renderMatch(state.room);
 }
 
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+document.addEventListener('visibilitychange', () => {
+  document.body.classList.toggle('tab-hidden', document.hidden);
+  if (!document.hidden && feed) { feed.catchingUp = true; syncRoom(feed); }
+});
 window.addEventListener('hashchange', route);
 route();

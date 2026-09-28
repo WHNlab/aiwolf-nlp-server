@@ -152,6 +152,7 @@ func (g *gameRecorder) OnAttackVote(id string, day int, agent model.AgentView, t
 func (g *gameRecorder) OnExecute(id string, day int, executed *model.AgentView, state model.GameState) {
 	e := &Event{Type: "execute", Day: day}
 	if executed != nil {
+		g.markDead(executed.Idx)
 		e.ToIdx = intPtr(executed.Idx)
 		e.Text = "追放されました"
 		g.append(e)
@@ -174,6 +175,9 @@ func (g *gameRecorder) OnGuard(id string, day int, agent model.AgentView, target
 func (g *gameRecorder) OnAttack(id string, day int, attacked *model.AgentView, guarded bool, state model.GameState) {
 	e := &Event{Type: "attack", Day: day, Guarded: &guarded}
 	if attacked != nil {
+		if !guarded {
+			g.markDead(attacked.Idx)
+		}
 		e.ToIdx = intPtr(attacked.Idx)
 		e.Text = "襲撃されました"
 	} else {
@@ -183,6 +187,15 @@ func (g *gameRecorder) OnAttack(id string, day int, attacked *model.AgentView, g
 		e.Text = "襲撃は防がれました"
 	}
 	g.append(e)
+}
+
+// 公開された死亡と視点を同時に更新し、次の朝まで助言できる状態を残さない。
+func (g *gameRecorder) markDead(idx int) {
+	g.room.mu.Lock()
+	defer g.room.mu.Unlock()
+	if seat := g.room.seatByIdx(idx); seat != nil {
+		seat.Alive = false
+	}
 }
 
 func (g *gameRecorder) OnOwnerMessage(id string, day int, agent model.AgentView, message string) {

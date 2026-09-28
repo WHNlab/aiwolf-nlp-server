@@ -2,7 +2,7 @@
 
 [日本語](../ja/tabletop-ui-design.md) · [Existing Web design](web-ui-design.md)
 
-2026-09-28. **Planning and concept only. The game screen has not been implemented or replaced.** This document supersedes the match screen, history, and spectator effects sections of the existing Web design. Home, joining, invitations, Light-only styling, and owner perspective authorization remain applicable.
+2026-09-28. **Initial implementation available.** This document supersedes the match screen, history, and spectator effects sections of the existing Web design. Home, joining, invitations, Light-only styling, and owner perspective authorization remain applicable.
 
 ## 1. Direction
 
@@ -115,7 +115,7 @@ Use HTML/CSS and lightweight avatar artwork. No initial requirement for WebGL, p
 - Pause decorative motion in hidden tabs and synchronize on return. With `prefers-reduced-motion`, remove movement, pulses, and confetti while keeping text and outlines.
 - Notifications and speech audio are outside this scope. A speaking robot effect does not claim actual audio playback.
 
-## 7. Existing data and required extensions
+## 7. Baseline investigation and required extensions
 
 | Display | Current support and implementation |
 | --- | --- |
@@ -128,7 +128,7 @@ Use HTML/CSS and lightweight avatar artwork. No initial requirement for WebGL, p
 
 Label preliminary static fixtures as demos. Shipping a current responder indicator requires the server work below. Otherwise, honestly show only the latest received speech.
 
-### Proposed progress projection, not an existing API
+### Progress projection
 
 Add public `phase`, progress `revision`, and `active_public_turn` under `RoomView.progress`. The latter exists only while awaiting public TALK and contains `turn_id / agent_idx / state / deadline_at`. The deadline is optional and null when no authoritative value is available. Correct client clock offset with `server_time`.
 
@@ -196,8 +196,24 @@ Use shared fixtures and contracts. Agree on component file boundaries before con
 - History reading does not stop live updates. New messages preserve reading position, mobile panels, and drafts.
 - Vote disclosure, owner death, finish, and reconnection do not omit or duplicate information or replay old effects.
 - Inspect public/owner/omniscient traffic and DOM for hidden night actors, targets, and private messages.
-- During implementation, run Go and browser checks appropriate to the changes. This planning task adds or runs no code tests. Docker verification may remain omitted as requested by the user.
+- During implementation, run Go and browser checks appropriate to the changes. Docker verification may remain omitted as requested by the user.
 
 ## 12. Image-generation record
 
 Created with built-in ImageGen using the existing logo and the user's seating-reference image. The [saved concept](../design/tabletop-ui-v1/concept.png) and [exact prompt](../design/tabletop-ui-v1/prompt.txt) are included. This is a design-review image, not a finished in-game asset.
+
+## 13. Initial implementation
+
+- `web/static/tabletop.js` / `tabletop.css`: neutral robots and the table. Lightweight SVG and CSS draw individual seats, labels, and states instead of using the mockup as a background image.
+- `web/static/app.js` / `match.css`: match screen, latest speech, owner panel, participant details, and results. Lobby, invitations, and home retain their existing navigation.
+- `web/static/history.js`: a history notebook using native `dialog`. Day, speaker, and channel filters preserve reading position and unread counts while reading older entries. Private messages stay in the owner panel.
+- The server supplies actual public phases and public response waits through `progress`. Deadlines are `null` in this release; no countdown or next speaker is displayed.
+- Asset versions include the split modules so a screen update does not retain outdated components.
+
+The concept image remains a visual reference, not a screenshot of the implementation. Audio, WebGL, and frame-by-frame character animation are outside the initial release.
+
+### Implementation checks
+
+Five, nine, and thirteen seats were checked at 1440×900, 1024×768, 390×844, and 360×640; detected seat overlaps and horizontal overflow were corrected. The omniscient view with role badges was also checked at 1280px, and controls remain usable at 360px with 200% text size. Below 901px, seats use vertical side columns; vertical space expands for larger text and role badges.
+
+History filters are collapsible. Browser checks covered reading position, unread counts, drafts, Escape focus restoration, keyphrase entry, night, death, and game completion. Public progress passed the full Go test suite; death permissions passed `go test -race ./room` and the real-match `TestRoomGameEndToEnd`. `go build ./...` and `go vet ./...` also passed. Run `node --test web/test/tabletop.test.mjs` to verify stable seating, public speakers, name escaping, and role-independent seat colors. Docker verification was omitted.

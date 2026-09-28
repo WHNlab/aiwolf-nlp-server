@@ -5,25 +5,35 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"io/fs"
 )
 
 //go:embed static
 var Static embed.FS
 
-// AssetVersion はCSSとJSの内容から作り、CDNに古い画面が残るのを防ぐ。
+// AssetVersion は分割したモジュール・素材も含め、更新時に一緒に切り替える。
 var AssetVersion = assetVersion()
 
 func assetVersion() string {
-	css, err := Static.ReadFile("static/style.css")
-	if err != nil {
-		panic(err)
-	}
-	js, err := Static.ReadFile("static/app.js")
-	if err != nil {
-		panic(err)
-	}
 	hash := sha256.New()
-	hash.Write(css)
-	hash.Write(js)
+	err := fs.WalkDir(Static, "static", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		data, err := Static.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		hash.Write([]byte(path))
+		hash.Write([]byte{0})
+		hash.Write(data)
+		return nil
+	})
+	if err != nil {
+		panic(err)
+	}
 	return hex.EncodeToString(hash.Sum(nil)[:8])
 }

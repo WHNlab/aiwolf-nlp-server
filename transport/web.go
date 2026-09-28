@@ -111,6 +111,8 @@ func (s *Server) serveStatic(c *gin.Context, fsys fs.FS, path string) {
 	case strings.HasSuffix(path, ".css"):
 		c.Data(http.StatusOK, "text/css; charset=utf-8", data)
 	case strings.HasSuffix(path, ".js"):
+		c.Header("Cache-Control", "no-cache")
+		data = []byte(strings.ReplaceAll(string(data), "__ASSET_VERSION__", web.AssetVersion))
 		c.Data(http.StatusOK, "text/javascript; charset=utf-8", data)
 	case strings.HasSuffix(path, ".svg"):
 		c.Data(http.StatusOK, "image/svg+xml", data)

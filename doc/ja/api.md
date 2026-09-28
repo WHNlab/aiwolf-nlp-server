@@ -64,6 +64,8 @@ curl -H "Authorization: Bearer <TOKEN>" http://127.0.0.1:8080/api/v1/games
 
 視点 (`viewer.view_mode`) は `public` / `agent` / `omniscient` の3種類です。+ゲーム終了・中断後、または自分のAIが死亡した閲覧者は `omniscient` となり、役職・襲撃投票などを含む全情報が見えます。
 
+追放・襲撃で死亡が確定すると、そのイベントと同時に席の生死・本人の視点・助言送信可否を更新します。護衛されたAIの生死は変えません。
+
 ## 各エンドポイント
 
 ### GET /api/v1/healthz

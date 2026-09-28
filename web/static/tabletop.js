@@ -30,8 +30,8 @@ const PALETTE = [
 const RING = {
   d: {
     l: { rx: 39, ry: 36, cy: 48 },
-    m: { rx: 42, ry: 37, cy: 48 },
-    s: { rx: 44, ry: 37, cy: 48 },
+    m: { rx: 38, ry: 37, cy: 48 },
+    s: { rx: 38, ry: 37, cy: 48 },
   },
   m: {
     l: { rx: 35, ry: 33, cy: 47 },
@@ -41,6 +41,8 @@ const RING = {
 };
 
 const PHASE_LABEL = {
+  waiting: ['待機中', 'is-run', 'bot'],
+  starting: ['開始中', 'is-run', 'bot'],
   day_discussion: ['昼・議論', 'is-day', 'sun'],
   day_vote: ['昼・投票', 'is-day', 'sun'],
   night: ['夜', 'is-night', 'moon'],
@@ -244,6 +246,9 @@ export function stageHtml(room, events = [], options = {}) {
   const lis = seats.map((s, i) => {
     const p = (i - anchor + n) % n;
     const ang = 90 + (p * 360) / n;
+    const half = Math.floor(n / 2);
+    const side = p === 0 ? 'bottom' : p <= half ? 'left' : 'right';
+    const row = p === 0 ? half + 1 : p <= half ? half - p + 1 : p - half;
     const rad = (ang * Math.PI) / 180;
     const cos = Math.cos(rad);
     const sin = Math.sin(rad);
@@ -265,7 +270,7 @@ export function stageHtml(room, events = [], options = {}) {
     if (isMine) cls.push('is-mine');
     const fx = [];
     if (justStarted) fx.push('tt-fx-land');
-    if (animate && isLatest) fx.push('tt-fx-pop');
+    if (animate && options.talkChanged !== false && isLatest) fx.push('tt-fx-pop');
     if (animate && isDead && prevAlive.get(s.seat_id) === true) fx.push('tt-fx-death');
 
     const aria = [`${num} ${name}`];
@@ -278,21 +283,21 @@ export function stageHtml(room, events = [], options = {}) {
     const style = [
       `--tx:${(50 + dl.rx * cos).toFixed(2)}%`, `--ty:${(dl.cy + dl.ry * sin).toFixed(2)}%`,
       `--mx:${(50 + ml.rx * cos).toFixed(2)}%`, `--my:${(ml.cy + ml.ry * sin).toFixed(2)}%`,
-      `--rb:${color[0]}`, `--rbd:${color[1]}`, `--rbp:${color[2]}`,
+      `--m-row:${row}`, `--m-col:${side === 'right' ? 3 : 1}`, `--rb:${color[0]}`, `--rbd:${color[1]}`, `--rbp:${color[2]}`,
     ];
-    if (justStarted) style.push(`--d:${Math.min(p * 45, 500)}ms`);
+    if (justStarted) style.push(`--d:${Math.min(p * 15, 150)}ms`);
 
     const waitFlag = isPending
       ? `<span class="tt-flag tt-flag-wait">${IC.think}<span>${pendingWord}</span></span>` : '';
     const talkFlag = isLatest
-      ? `<span class="tt-flag tt-flag-talk">${IC.talk}<span>発言</span></span>` : '';
+      ? `<span class="tt-flag tt-flag-talk">${IC.talk}<span>公開発言</span></span>` : '';
     const ribbon = isDead ? '<span class="tt-ribbon" aria-hidden="true">死亡</span>' : '';
     const ring = isPending ? '<span class="tt-ring" aria-hidden="true"></span>' : '';
     const extra = (isMine || roleJa)
       ? `<span class="tt-extra">${isMine ? '<span class="tt-mine">あなたのAI</span>' : ''}${roleJa ? `<span class="tt-role">${esc(roleJa)}</span>` : ''}</span>`
       : '';
 
-    return `<li class="${cls.join(' ')} ${fx.join(' ')}" style="${style.join(';')}">
+    return `<li class="${cls.join(' ')} ${fx.join(' ')}" data-side="${side}" style="${style.join(';')}">
       <button type="button" class="tt-seat-btn" data-seat-id="${esc(s.seat_id)}"${idx != null ? ` data-agent-idx="${idx}"` : ''} aria-label="${esc(aria.join('、'))}">
         <span class="tt-robot${flip ? ' tt-flip' : ''}">${ring}${robotSvg(view)}</span>
         ${ribbon}
@@ -307,7 +312,7 @@ export function stageHtml(room, events = [], options = {}) {
   const alive = seats.filter((s) => s.alive !== false).length;
   const phase = phaseInfo(room);
   const chips = [];
-  if (room.day > 0) chips.push(`<span class="tt-chip tt-chip-day">${esc(room.day)}日目</span>`);
+  if (room.day != null) chips.push(`<span class="tt-chip tt-chip-day">${esc(room.day)}日目</span>`);
   chips.push(`<span class="tt-chip tt-chip-phase ${phase.cls}">${phase.icon ? IC[phase.icon] : ''}<span>${esc(phase.label)}</span></span>`);
   chips.push(`<span class="tt-chip tt-chip-alive">${IC.bot}<span>生存 ${alive}/${n}</span></span>`);
   if (turn) {
@@ -321,8 +326,9 @@ export function stageHtml(room, events = [], options = {}) {
   const stageCls = ['tt-stage'];
   if (!connected) stageCls.push('is-off');
   if (animate) stageCls.push('is-fx');
+  if (animate && prev?.progress?.phase !== room.progress?.phase) stageCls.push('tt-phase-change');
 
-  return `<section class="${stageCls.join(' ')}" data-n="${n}" data-size="${size}" aria-label="対戦テーブル">
+  return `<section class="${stageCls.join(' ')}" data-n="${n}" data-size="${size}" data-phase="${esc(room.progress?.phase || '')}" aria-label="対戦テーブル">
   <div class="tt-progress" aria-label="進行状況">${chips.join('')}</div>
   <div class="tt-arena">
     <div class="tt-table" aria-hidden="true"><span class="tt-table-top"><span class="tt-table-motif">${PAW}</span></span></div>

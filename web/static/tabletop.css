@@ -349,7 +349,7 @@
 .tt-stage[data-size="s"] { --rbw: 54px; --tt-tw: 72%; --tt-th: 54%; }
 
 /* ---------- モバイル: 手前1+左右に並ぶ縦長テーブル ---------- */
-@media (max-width: 767px) {
+@media (max-width: 900px) {
   .tt-stage { padding: 10px 6px 14px; }
   .tt-arena { margin-top: 26px; height: 340px; }
   .tt-stage[data-size="m"] .tt-arena { height: 470px; }
@@ -377,3 +377,59 @@
   .tt-seat.is-pending .tt-ring { opacity: 0.9; border-style: dashed; }
 }
 body.tt-paused .tt-stage * { animation-play-state: paused !important; }
+
+/* 多人数でも席の当たり判定を重ねず、文字拡大では行の高さを増やす。 */
+@media (min-width: 901px) {
+  .tt-arena { height: max(400px, 25rem); }
+  .tt-stage[data-size="m"] .tt-arena { height: max(480px, 30rem); }
+  .tt-stage[data-size="s"] .tt-arena { height: max(560px, 35rem); }
+  .tt-stage:is([data-size="m"], [data-size="s"]) .tt-seat-btn { display: grid; grid-template-columns: 44px minmax(0, 1fr); width: 140px; column-gap: 4px; }
+  .tt-stage:is([data-size="m"], [data-size="s"]) .tt-robot { width: 44px; grid-column: 1; grid-row: 1 / span 3; }
+  .tt-stage:is([data-size="m"], [data-size="s"]) .tt-plate { grid-column: 2; padding: 2px 5px; gap: 3px; }
+  .tt-stage:is([data-size="m"], [data-size="s"]) .tt-name { font-size: .72rem; }
+  .tt-stage:is([data-size="m"], [data-size="s"]) .tt-extra { grid-column: 2; flex-wrap: wrap; }
+  .tt-stage:is([data-size="m"], [data-size="s"]) .tt-flag { position: static; transform: none; grid-column: 2; font-size: .6rem; justify-self: center; }
+  .tt-stage:is([data-size="m"], [data-size="s"]) .tt-ribbon { left: 27px; top: 30px; }
+}
+@media (max-width: 900px) {
+  .tt-stage .tt-arena, .tt-stage[data-size="m"] .tt-arena, .tt-stage[data-size="s"] .tt-arena { height: auto; margin-top: 20px; }
+  .tt-seats { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 18px minmax(0, 1fr); grid-auto-rows: minmax(52px, auto); gap: 8px 0; }
+  .tt-seat { position: relative; left: auto; top: auto; transform: none; grid-column: var(--m-col); grid-row: var(--m-row); min-width: 0; display: flex; align-items: center; }
+  .tt-seat-btn { width: 100%; min-width: 0 !important; display: grid; grid-template-columns: minmax(0, 1fr) var(--rbw); gap: 2px 4px; padding: 5px 0; }
+  .tt-robot { grid-column: 2; grid-row: 1 / span 4; }
+  .tt-plate { grid-column: 1; grid-row: 1; padding: 2px 4px; gap: 3px; min-width: 0; }
+  .tt-name { font-size: .7rem; min-width: 0; }
+  .tt-num { font-size: .7rem; }
+  .tt-extra { grid-column: 1; flex-wrap: wrap; justify-content: center; }
+  .tt-flag { position: static; transform: none; grid-column: 1; justify-self: center; font-size: .6rem; padding: 1px 4px; }
+  .tt-ribbon { left: auto; right: calc(var(--rbw) / 2); top: 50%; transform: translate(50%, -50%) rotate(-8deg); font-size: .6rem; padding: 1px 5px; }
+  .tt-seat[data-side="right"] .tt-seat-btn { grid-template-columns: var(--rbw) minmax(0, 1fr); }
+  .tt-seat[data-side="right"] .tt-robot { grid-column: 1; }
+  .tt-seat[data-side="right"] .tt-plate, .tt-seat[data-side="right"] .tt-extra, .tt-seat[data-side="right"] .tt-flag { grid-column: 2; }
+  .tt-seat[data-side="right"] .tt-ribbon { left: calc(var(--rbw) / 2); right: auto; transform: translate(-50%, -50%) rotate(-8deg); }
+  .tt-seat[data-side="bottom"] { grid-column: 1 / -1; justify-content: center; padding-top: 8px; }
+  .tt-seat[data-side="bottom"] .tt-seat-btn { display: flex; flex-direction: column; width: auto; max-width: 90%; }
+  .tt-seat[data-side="bottom"] .tt-plate { max-width: 170px; }
+  .tt-seat[data-side="bottom"] .tt-ribbon { left: 50%; right: auto; top: 24px; transform: translateX(-50%) rotate(-8deg); }
+  .tt-table { width: 56%; height: calc(100% - 100px); top: 0; transform: translate(-50%, 0); }
+  .tt-stage[data-size="l"] .tt-seats { row-gap: 12px; grid-auto-rows: minmax(92px, auto); }
+  .tt-stage[data-size="l"] .tt-table { width: 62%; }
+  .tt-chip { white-space: normal; max-width: 100%; overflow-wrap: anywhere; }
+  .tt-mine, .tt-role { white-space: normal; }
+  .tt-ring { inset: -4px; }
+}
+.tt-seat.tt-fx-land .tt-seat-btn { animation-duration: .4s; }
+@media (max-width: 900px) {
+  .tt-stage[data-size="s"] { --rbw: 36px; }
+  .tt-stage[data-size="s"] .tt-seats { row-gap: 4px; }
+  .tt-stage[data-size="s"] .tt-seat-btn { padding: 2px 0; min-height: 48px; }
+  .tt-stage[data-size="s"] .tt-mine, .tt-stage[data-size="s"] .tt-role { font-size: .65rem; }
+  .tt-stage[data-size="s"] .tt-name, .tt-stage[data-size="s"] .tt-num { font-size: .72rem; }
+  .tt-stage[data-size="s"] .tt-seat[data-side="bottom"] .tt-plate { min-width: 150px; }
+}
+
+.tt-plate, .tt-name { min-width: 0; }
+@media (min-width: 901px) { .tt-seat-btn { width: 150px; } }
+.tt-stage[data-phase="night"] { background: #f6f2fc; }
+.tt-phase-change .tt-chip-phase { animation: tt-phase .35s ease-out; }
+@keyframes tt-phase { from { opacity: .5; } to { opacity: 1; } }
