@@ -125,6 +125,7 @@ observer や REST API へ渡す値は、内部状態へ到達できない読み�
 | `SECRET_KEY` | `server.authentication.enable` が `true` の場合のトークン検証の秘密鍵 |
 | `HOST` | `server.web_socket.host` の上書き |
 | `PORT` | `server.web_socket.port` の上書き |
+| `PUBLIC_WS_URL` | `server.web_socket.public_url` の上書き |
 | `WEB_HOST` | `server.web.host` の上書き |
 | `WEB_PORT` | `server.web.port` の上書き |
 

@@ -3,6 +3,7 @@ package transport
 import (
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -48,6 +49,23 @@ func (s *Server) buildWebRouter() *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "version": Version.Version})
 	})
 	api.GET("/room-presets", s.handleRoomPresets)
+	router.GET(web.PlayerKitPath, func(c *gin.Context) {
+		data, err := web.PlayerKitArchive()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "参加キットを生成できませんでした"})
+			return
+		}
+		c.Header("Content-Disposition", `attachment; filename="aiwolf-player-`+web.PlayerKitVersion+`.zip"`)
+		c.Data(http.StatusOK, "application/zip", data)
+	})
+	router.GET("/agent/SKILL.md", func(c *gin.Context) {
+		data, _ := web.PlayerKit.ReadFile("kit/aiwolf-player/SKILL.md")
+		c.Data(http.StatusOK, "text/plain; charset=utf-8", data)
+	})
+	router.GET("/agent/GUIDE.md", func(c *gin.Context) {
+		data, _ := web.PlayerKit.ReadFile("kit/aiwolf-player/GUIDE.md")
+		c.Data(http.StatusOK, "text/plain; charset=utf-8", data)
+	})
 
 	rooms := api.Group("/rooms")
 	rooms.POST("", s.handleCreateRoom)
@@ -420,19 +438,22 @@ func (s *Server) handleAgentInvite(c *gin.Context) {
 	if c.Request.TLS != nil {
 		wsScheme = "wss"
 	}
-	// WSは別ポートで待ち受ける。ブラウザのHostからホスト名を取り、ポートだけ差し替える。
-	wsHost := c.Request.Host
-	if i := strings.LastIndex(wsHost, ":"); i >= 0 {
-		wsHost = wsHost[:i]
+	// 外部URLは明示設定を優先する。TLS終端や別ドメインを内部リスナから推測しない。
+	base := s.config.Server.WebSocket.PublicURL
+	if base == "" {
+		u := url.URL{Host: c.Request.Host}
+		base = wsScheme + "://" + net.JoinHostPort(u.Hostname(), strconv.Itoa(s.config.Server.WebSocket.Port)) + "/ws"
 	}
-	wsPort := s.config.Server.WebSocket.Port
-	if wsHost == "" {
-		wsHost = s.config.Server.WebSocket.Host
-	}
-	invite := r.InviteFor(sess, wsScheme+"://"+wsHost+":"+strconv.Itoa(wsPort)+"/ws")
+	invite := r.InviteFor(sess, base)
 	if invite == nil {
 		jsonError(c, room.ErrSeatNotClaimable)
 		return
+	}
+	invite["kit_version"] = web.PlayerKitVersion
+	invite["kit_path"] = web.PlayerKitPath
+	c.Header("Cache-Control", "no-store")
+	if c.Query("download") == "1" {
+		c.Header("Content-Disposition", `attachment; filename="invite.json"`)
 	}
 	c.JSON(http.StatusOK, invite)
 }

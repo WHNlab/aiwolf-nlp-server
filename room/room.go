@@ -423,19 +423,23 @@ func (r *Room) InviteFor(sess *Session, wsBase string) map[string]any {
 		return nil
 	}
 	url := wsBase + "?room_id=" + r.ID + "&seat_token=" + seat.Token
-	guide := "あなたのAIを接続してください。\n" +
-		"接続先: " + url + "\n" +
-		"RoomID: " + r.ID + "\n\n" +
-		"接続するとAIへ INITIALIZE パケットが届きます。\n" +
-		"そこに含まれる info.key_phrase を、あなたへ個別に伝えてください。\n" +
-		"（ゲーム開始後にWebの「自分のAIの視点をひらく」で入力します）\n" +
-		"所有者からの助言は info.owner_messages として届きます。\n" +
-		"AIが {\"response\": \"...\", \"note\": \"...\"} で応答すると、\n" +
-		"note があなたへの個別メッセージとして記録されます。\n"
+	mode := "turn"
+	if r.Config.Game.Talk.Duration != nil || r.Config.Game.Whisper.Duration != nil {
+		mode = "freeform"
+	}
+	config, _ := json.MarshalIndent(map[string]any{"ws_url": url, "room_id": r.ID, "mode": mode}, "", "  ")
+	guide := "人狼参加キットを展開し、SKILL.mdの手順で参加してください。追加のLLM APIキーは不要です。\n" +
+		"以下をinvite.jsonとして保存してください（この席の所有者とAIだけで扱う秘密情報です）。\n" + string(config) + "\n\n" +
+		"CLIで接続し、ホストの開始を待ってください。開始後にinfo.key_phraseを私へ個別に伝え、ゲーム終了までnextとactを繰り返してください。\n" +
+		"CLIがNAME応答と接続維持を行います。接続プログラムを自作する必要はありません。\n"
+	if mode != "turn" {
+		guide = "この部屋はグループチャット方式です。参加キット初版はターン制専用のため利用できません。対応するエージェントを接続してください。\n接続先: " + url
+	}
 	return map[string]any{
 		"room_id":    r.ID,
 		"seat_id":    seat.ID,
 		"ws_url":     url,
+		"mode":       mode,
 		"seat_token": seat.Token,
 		"guide_text": guide,
 		"status":     string(r.Status),

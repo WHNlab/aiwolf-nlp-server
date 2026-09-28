@@ -21,6 +21,14 @@ jobs:
         run: go build -race -ldflags "-X main.version=$(git describe --tag --abbrev=0) -X main.revision=$(git rev-list -1 HEAD) -X main.build=$(git describe --tags)" -v ./...
       - name: Test with the Go CLI
         run: go test -race -ldflags "-X main.version=$(git describe --tag --abbrev=0) -X main.revision=$(git rev-list -1 HEAD) -X main.build=$(git describe --tags)" -v ./...
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Test Agent Kit
+        run: |
+          python -m pip install -r web/kit/aiwolf-player/requirements.txt PyYAML==6.0.3
+          go build -race -o /tmp/aiwolf-kit-server .
+          AIWOLF_TEST_SERVER=/tmp/aiwolf-kit-server python -m unittest discover -s test -p agent_kit_test.py -v
       - name: Upload JSON Log
         uses: actions/upload-artifact@v4
         with:

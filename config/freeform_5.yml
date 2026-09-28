@@ -5,6 +5,7 @@ server:
   web_socket:
     host: 127.0.0.1
     port: 8081
+    public_url: "" # リバースプロキシ越しの公開WS URL。空欄ならローカル接続用に自動生成
   web:
     enable: true
     host: 127.0.0.1

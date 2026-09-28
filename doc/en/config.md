@@ -17,6 +17,7 @@ When they are not set, the values from the configuration file are used.
 - `PORT`: Overrides `server.web_socket.port`.
 - `WEB_HOST`: Overrides `server.web.host`.
 - `WEB_PORT`: Overrides `server.web.port`.
+- `PUBLIC_WS_URL`: Overrides `server.web_socket.public_url`.
 
 ## server (Server Settings)
 
@@ -26,6 +27,7 @@ When they are not set, the values from the configuration file are used.
   For connecting within the same machine, set it to `127.0.0.1`.
   For connecting from a local or external machine, set it to `0.0.0.0`.
 - `port`: The port number for the WebSocket server (for agent connections; the default is 8081).
+- `public_url`: Public WebSocket URL used in invitations, e.g. `wss://zinro-ws.nyaolab.com/ws`, without query parameters or credentials. When empty, a local URL is derived from the web request hostname and internal WS port. Set it explicitly with TLS termination or separate domains.
 
 ### web (Web UI Settings)
 

@@ -22,8 +22,9 @@ type Config struct {
 
 type ServerConfig struct {
 	WebSocket struct {
-		Host string `yaml:"host"`
-		Port int    `yaml:"port"`
+		Host      string `yaml:"host"`
+		Port      int    `yaml:"port"`
+		PublicURL string `yaml:"public_url"`
 	} `yaml:"web_socket"`
 	Web struct {
 		Enable bool   `yaml:"enable"`

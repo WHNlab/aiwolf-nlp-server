@@ -17,6 +17,7 @@
 - `PORT`: `server.web_socket.port` の上書き
 - `WEB_HOST`: `server.web.host` の上書き
 - `WEB_PORT`: `server.web.port` の上書き
+- `PUBLIC_WS_URL`: `server.web_socket.public_url` の上書き
 
 ## server (サーバ設定)
 
@@ -26,6 +27,7 @@
   同一マシン内で接続する場合は `127.0.0.1` を指定してください。
   ローカル内のマシンや外部から接続する場合は `0.0.0.0` を指定してください。
 - `port`: WebSocketサーバのポート番号（エージェント接続用。既定は 8081）
+- `public_url`: 招待で案内する公開WebSocket URL。例: `wss://zinro-ws.nyaolab.com/ws`。クエリ・認証情報を含めないでください。空欄ならWebのホスト名と内部WSポートからローカル用URLを生成します。TLS終端や別ドメインの運用では明示設定してください。
 
 ### web (Web UIの設定)
 

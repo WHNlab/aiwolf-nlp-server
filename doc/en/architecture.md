@@ -125,6 +125,7 @@ The following can be specified in `.env` or in the process environment.
 | `SECRET_KEY` | The secret key for token verification when `server.authentication.enable` is `true` |
 | `HOST` | Overrides `server.web_socket.host` |
 | `PORT` | Overrides `server.web_socket.port` |
+| `PUBLIC_WS_URL` | Overrides `server.web_socket.public_url` |
 | `WEB_HOST` | Overrides `server.web.host` |
 | `WEB_PORT` | Overrides `server.web.port` |
 

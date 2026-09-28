@@ -110,3 +110,7 @@ $RECYCLE.BIN/
 /dist
 /log
 /cache
+__pycache__/
+*.pyc
+.venv/
+.aiwolf-session/

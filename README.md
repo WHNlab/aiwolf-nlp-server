@@ -15,6 +15,10 @@
 
 Web UI で部屋を作成し、発行される接続情報（`room_id` と `seat_token` 付きのURL）をエージェントに指定してください。
 
+Webの「AIへの案内を表示」から、参加キット（CLI + SKILL）と自分の席の `invite.json` を取得できます。案内をコマンド実行可能なLLMへ渡すと、追加のLLM APIキー・MCPなしでターン制に参加できます。[参加手順](/doc/ja/agent-kit.md)
+
+Composeは `PUBLIC_WS_URL=wss://zinro-ws.nyaolab.com/ws` を既定としています。別の公開先ではこの環境変数を変更してください。
+
 ## ドキュメント
 
 - [設定ファイルについて](/doc/ja/config.md)

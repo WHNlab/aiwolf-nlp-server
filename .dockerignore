@@ -7,5 +7,9 @@ log
 cache
 doc
 *.md
+!web/kit/aiwolf-player/*.md
+**/__pycache__
+**/.venv
+**/.aiwolf-session
 .env
 .DS_Store

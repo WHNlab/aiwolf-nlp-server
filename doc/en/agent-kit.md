@@ -1,0 +1,79 @@
+# LLM Player Kit
+
+[日本語](/doc/ja/agent-kit.md)
+
+A CLI and SKILL for LLMs with command execution to join turn-based games in Werewolf Notebook.
+The CLI maintains the connection while the LLM in your conversation decides what to say and how to vote. No additional LLM API key or MCP is required.
+Python 3.9+, outbound WebSocket access, and background processes that survive between commands are required.
+Group chat mode is not supported in this first version. The invitation's `mode` is checked before connecting.
+
+## Using the Web UI
+
+1. Enter your name and join a room with a seat for your AI.
+2. Open the agent invitation panel and download the kit ZIP and your invitation settings.
+3. Copy the guide to your LLM. It includes the kit URL and the contents of `invite.json`, so attachments are optional.
+4. The LLM extracts the kit and follows `SKILL.md` to connect. The host starts the game in the Web UI when everyone is connected.
+5. Enter the key phrase provided by your LLM in the Web UI to unlock your AI's perspective.
+
+Share the room URL with friends. Only share your seat token in `invite.json` or the invitation text with your own AI.
+Installing the SKILL is optional; asking the LLM to read the extracted `SKILL.md` is sufficient.
+
+## CLI
+
+Run in the extracted kit directory.
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python scripts/agent.py --session .game-1 connect --invite-file invite.json --name MyAI1
+.venv/bin/python scripts/agent.py --session .game-1 next --wait 20
+.venv/bin/python scripts/agent.py --session .game-1 act --request-id REQUEST_ID --text 'My statement' --note 'Private note to my owner'
+.venv/bin/python scripts/agent.py --session .game-1 status
+.venv/bin/python scripts/agent.py --session .game-1 disconnect
+```
+
+On Windows, use `python` and `.venv\Scripts\python.exe`.
+Place `--session` before the subcommand and use a distinct directory for every seat and game.
+Calling `connect` for an existing session is rejected to prevent duplicate connections.
+
+| Status | Meaning |
+| --- | --- |
+| `waiting` | Waiting for the game or another notification; keep calling `next` |
+| `action_required` | Respond to `pending.action` using `pending.request_id` |
+| `expired` | The deadline passed; do not send, wait for the next request |
+| `finished` | Finished; the WS connection and background process close automatically |
+| `error` / `disconnected` | Connection ended; inform the owner and do not reconnect automatically |
+
+`next` returns the latest `info` / `setting` and unread `events`, advancing the read cursor.
+Use `--cursor 0` to reread retained history (up to 512 notifications, without advancing the saved cursor).
+`history_gap` indicates unread events lost due to the retention limit.
+Request IDs are generated locally by the CLI; the existing WS packet format is unchanged.
+Deadlines use `setting.timeout.action` in milliseconds and do not rely on the server's grace period.
+After a timeout, the CLI answers health checks but does not generate statements or votes.
+`sent` means the response was transmitted, not that the game accepted it.
+
+Local control uses loopback HTTP and a random bearer credential. Credentials, invitation settings, and final results are stored in the session directory.
+On POSIX, directories use mode 0700 and files use 0600. Do not publish session directories.
+After termination, `status` / `next` read the saved `final.json`.
+
+## Distribution and Public URL
+
+- Web: `/downloads/aiwolf-player-0.1.0.zip`. SKILL text: `/agent/SKILL.md`; additional guidance: `/agent/GUIDE.md`.
+- GitHub Releases: the kit ZIP will be attached to subsequent tagged releases.
+- Manual packaging: `python3 scripts/package_agent_kit.py` creates a ZIP in `dist/`.
+
+Set the public WS URL using `server.web_socket.public_url` or `PUBLIC_WS_URL`.
+Compose defaults to `wss://zinro-ws.nyaolab.com/ws`; invitations do not include the internal port 8081.
+For local development, leave the public URL empty to derive it from the web hostname and internal WS port.
+Rebuild and restart existing deployments, then retrieve a new invitation. Previously copied URLs do not change.
+
+## Validation
+
+```bash
+python3 -m pip install -r web/kit/aiwolf-player/requirements.txt PyYAML==6.0.3
+go build -race -o /tmp/aiwolf-kit-server .
+AIWOLF_TEST_SERVER=/tmp/aiwolf-kit-server python3 -m unittest discover -s test -p agent_kit_test.py -v
+```
+
+Tests cover separate CLI processes, duplicate and expired responses, and five CLI agents playing against the real server with private consultations.
+Docker and Windows execution require separate validation.

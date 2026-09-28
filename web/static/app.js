@@ -311,6 +311,9 @@ function inviteHtml(data) {
     <div id="invite-detail" hidden style="margin-top:10px">
       <textarea id="invite-text" rows="8" readonly></textarea>
       <button class="btn btn--small" id="btn-copy-guide" style="margin-top:6px">案内をコピー</button>
+      <a class="btn btn--small" id="kit-download" download>参加キットをダウンロード</a>
+      <a class="btn btn--small" href="/api/v1/rooms/${encodeURIComponent(data.room_id)}/invite?download=1" download="invite.json">自分の招待設定を保存</a>
+      <p class="field-hint">案内をAIに渡すと、接続と参加の手順を確認できます。招待設定は自分のAIだけに渡してください。参加キット初版はターン制専用です。</p>
     </div>
   </div>`;
 }
@@ -437,7 +440,9 @@ function bindRoomEvents(data) {
     try {
       const d = await api(`/api/v1/rooms/${data.room_id}/invite`);
       $('#invite-detail').hidden = false;
-      $('#invite-text').value = d.guide_text;
+      $('#invite-text').value = (d.mode === 'turn' ? `参加キット: ${new URL(d.kit_path, location.origin).href}\n\n` : '') + d.guide_text;
+      $('#kit-download').href = d.kit_path;
+      $('#kit-download').hidden = d.mode !== 'turn';
     } catch (ex) { toast(ex.message); }
   };
   const bcg = $('#btn-copy-guide');

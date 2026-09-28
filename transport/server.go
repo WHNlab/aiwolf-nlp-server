@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -35,6 +36,12 @@ type Server struct {
 }
 
 func NewServer(config model.Config) (*Server, error) {
+	if raw := config.Server.WebSocket.PublicURL; raw != "" {
+		u, err := url.Parse(raw)
+		if err != nil || (u.Scheme != "ws" && u.Scheme != "wss") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			return nil, errors.New("公開WebSocket URLには認証情報・クエリなしのws://またはwss:// URLを指定してください")
+		}
+	}
 	server := &Server{
 		config: config,
 		upgrader: websocket.Upgrader{

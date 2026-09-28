@@ -15,11 +15,15 @@ func TestApplyEnvOverridesNoopWhenUnset(t *testing.T) {
 }
 
 func TestApplyEnvOverridesApplies(t *testing.T) {
+	t.Setenv("PUBLIC_WS_URL", "wss://zinro-ws.nyaolab.com/ws")
 	t.Setenv("HOST", "0.0.0.0")
 	t.Setenv("PORT", "9999")
 
 	c := Config{}
 	c.ApplyEnvOverrides()
+	if c.Server.WebSocket.PublicURL != "wss://zinro-ws.nyaolab.com/ws" {
+		t.Fatal("公開URLが上書きされませんでした")
+	}
 
 	if c.Server.WebSocket.Host != "0.0.0.0" {
 		t.Errorf("host: got %q", c.Server.WebSocket.Host)

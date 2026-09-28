@@ -176,3 +176,9 @@ data:{"id":"...","idx":1,"day":0,"is_day":true,"agents":[...],"event":"開始","
 | `占い` | - | 占い師 | 占い先 | - |
 | `護衛` | - | 騎士 | 護衛先 | - |
 | `襲撃` | - | 護衛された場合は -1 | 襲撃対象 (いない場合は省略) | - |
+
+## 参加キットと招待設定
+
+`GET /api/v1/rooms/{id}/invite` は所有者本人にのみ、`ws_url`、`mode`（`turn` / `freeform`）、`kit_version`、`kit_path`、`guide_text` を返します。`?download=1` で `invite.json` として保存できます。レスポンスは `Cache-Control: no-store` です。
+公開URLは `server.web_socket.public_url` を優先し、WebのドメインやTLS終端からは推測しません。
+`GET /downloads/aiwolf-player-0.1.0.zip` は秘密情報を含まないCLI・SKILL一式を認証なしで返します。`GET /agent/SKILL.md` と `GET /agent/GUIDE.md` は案内本文です。詳細は[参加キット](/doc/ja/agent-kit.md)を参照してください。

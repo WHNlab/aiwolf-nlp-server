@@ -21,10 +21,13 @@ jobs:
           CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "-X main.version=$(git describe --tag --abbrev=0) -X main.revision=$(git rev-list -1 HEAD) -X main.build=$(git describe --tags)" -o dist/aiwolf-nlp-server-windows-amd64.exe
           CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.version=$(git describe --tag --abbrev=0) -X main.revision=$(git rev-list -1 HEAD) -X main.build=$(git describe --tags)" -o dist/aiwolf-nlp-server-darwin-amd64
           CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "-X main.version=$(git describe --tag --abbrev=0) -X main.revision=$(git rev-list -1 HEAD) -X main.build=$(git describe --tags)" -o dist/aiwolf-nlp-server-darwin-arm64
+      - name: Package Agent Kit
+        run: python3 scripts/package_agent_kit.py
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
+            dist/aiwolf-player-*.zip
             dist/aiwolf-nlp-server-linux-amd64
             dist/aiwolf-nlp-server-windows-amd64.exe
             dist/aiwolf-nlp-server-darwin-amd64
