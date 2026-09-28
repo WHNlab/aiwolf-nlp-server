@@ -15,6 +15,10 @@ func (g *Game) getVotedCandidates(votes []model.Vote) []model.Agent {
 
 func (g *Game) doExecution() {
 	slog.Info("追放フェーズを開始します", "id", g.id, "day", g.currentDay)
+	// 夜間のカスタム実行フェーズを公開投票と誤認しない。
+	if g.isDaytime {
+		g.obs.OnPublicPhase(g.id, model.PublicPhaseDayVote, g.currentDay)
+	}
 	var executed *model.Agent
 	candidates := make([]model.Agent, 0)
 	for range g.setting.VoteMaxCount() {

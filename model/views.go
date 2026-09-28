@@ -2,6 +2,23 @@ package model
 
 import "time"
 
+// PublicPhase は観戦者へ公開できる進行フェーズ。
+type PublicPhase string
+
+const (
+	PublicPhaseWaiting       PublicPhase = "waiting"
+	PublicPhaseDayDiscussion PublicPhase = "day_discussion"
+	PublicPhaseDayVote       PublicPhase = "day_vote"
+	PublicPhaseNight         PublicPhase = "night"
+	PublicPhaseFinished      PublicPhase = "finished"
+)
+
+// PublicTurnView は公開TALKの応答待ちを示す読み取り専用ビュー。
+type PublicTurnView struct {
+	TurnID   string
+	AgentIdx int
+}
+
 // observerやAPIへ渡す唯一のエージェント表現。生のConnection/msgChanを含めない値型とし、
 // 外部から内部状態へ到達・変更できないようにする。
 type AgentView struct {

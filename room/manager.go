@@ -112,6 +112,7 @@ func (m *Manager) CreateRoom(sess *Session, p CreateParams) (*Room, error) {
 		Config:    cfg,
 		AgentCnt:  p.AgentCount,
 		Status:    StatusWaiting,
+		phase:     model.PublicPhaseWaiting,
 		HostID:    sess.UserID,
 		Members:   map[string]*Member{},
 		Events:    []*Event{},
@@ -549,6 +550,11 @@ func projectSummary(r *Room) map[string]any {
 		"connected": r.connectedCount(),
 		"day":       r.day,
 		"win_side":  r.WinSide,
+		"progress": map[string]any{
+			"phase":              string(r.phase),
+			"revision":           r.progressRevision,
+			"active_public_turn": r.activePublicTurn,
+		},
 	}
 }
 

@@ -58,6 +58,10 @@ curl -H "Authorization: Bearer <TOKEN>" http://127.0.0.1:8080/api/v1/games
 | `GET /api/v1/rooms/{id}/history?cursor=N` | 閲覧権限でフィルタしたイベント履歴 (seq > cursor) |
 | `GET /api/v1/rooms/{id}/events` | イベント配信 (SSE、更新通知 `room` と接続維持 `heartbeat`) |
 
+`GET /api/v1/rooms/{id}` の `progress` は公開進行を返します。`phase` は `waiting`、`day_discussion`、`day_vote`、`night`、`finished` のいずれか、`revision` は進行状態の更新ごとに増加します。`active_public_turn` は昼のターン制公開 TALK 応答待ちだけに設定され、それ以外は `null` です。値には `turn_id`、`agent_idx`、`state: "waiting"`、`deadline_at: null` が含まれます。サーバが信頼できる期限を提供しないため、残り時間は投影しません。グループチャット方式と夜の行動者・秘密フェーズは単一の応答待ちとして公開しません。
+
+進行だけが変化した場合も SSE の `room` 更新が送られます。これは履歴 `seq` が増えない場合があります。翌日に公開される投票など、既存履歴の公開可否が変化したときは、日付・状態・視点の変更通知を受けて `GET /history` を cursor なしで再取得してください。cursor 指定は新しい seq のイベントだけを返します。
+
 視点 (`viewer.view_mode`) は `public` / `agent` / `omniscient` の3種類です。+ゲーム終了・中断後、または自分のAIが死亡した閲覧者は `omniscient` となり、役職・襲撃投票などを含む全情報が見えます。
 
 ## 各エンドポイント

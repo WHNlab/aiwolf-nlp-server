@@ -1,6 +1,7 @@
 package logic
 
 import (
+	"fmt"
 	"log/slog"
 	"sync/atomic"
 
@@ -18,6 +19,7 @@ type Game struct {
 	ruleset           model.RulesetView
 	setting           model.SettingView
 	currentDay        int
+	publicTurnSeq     uint64
 	isDaytime         bool
 	gameStatuses      map[int]*model.GameStatus
 	lastTalkIdxMap    map[*model.Agent]int
@@ -82,6 +84,7 @@ func NewGameWithRole(config *model.Config, settings *model.Setting, roleMapConns
 func (g *Game) Start() model.Team {
 	slog.Info("ゲームを開始します", "id", g.id)
 	g.obs.OnGameStart(g.id, model.ViewsOf(g.agents), g.gameState())
+	g.obs.OnPublicPhase(g.id, model.PublicPhaseDayDiscussion, g.currentDay)
 	g.requestToEveryone(model.R_INITIALIZE)
 	for {
 		g.progressDay()
@@ -103,6 +106,7 @@ func (g *Game) Start() model.Team {
 	villagers, werewolves := util.CountAliveTeams(g.getCurrentGameStatus().StatusMap)
 	g.obs.OnResult(g.id, g.currentDay, villagers, werewolves, g.winSide)
 	g.closeAllAgents()
+	g.obs.OnPublicPhase(g.id, model.PublicPhaseFinished, g.currentDay)
 	g.obs.OnGameEnd(g.id, g.winSide, g.gameState())
 	slog.Info("ゲームが終了しました", "id", g.id, "winSide", g.winSide)
 	g.isFinished.Store(true)
@@ -125,6 +129,7 @@ func (g *Game) shouldFinish() bool {
 func (g *Game) progressDay() {
 	slog.Info("昼セクションを開始します", "id", g.id, "day", g.currentDay)
 	g.isDaytime = true
+	g.obs.OnPublicPhase(g.id, model.PublicPhaseDayDiscussion, g.currentDay)
 	g.requestToEveryone(model.R_DAILY_INITIALIZE)
 	g.obs.OnDayStatus(g.id, g.currentDay, g.agentStatuses())
 
@@ -150,6 +155,7 @@ func (g *Game) progressDay() {
 func (g *Game) progressNight() {
 	slog.Info("夜セクションを開始します", "id", g.id, "day", g.currentDay)
 	g.isDaytime = false
+	g.obs.OnPublicPhase(g.id, model.PublicPhaseNight, g.currentDay)
 	g.requestToEveryone(model.R_DAILY_FINISH)
 
 	for _, phase := range g.ruleset.NightPhases() {
@@ -169,6 +175,11 @@ func (g *Game) progressNight() {
 	}
 
 	slog.Info("夜セクションを終了します", "id", g.id, "day", g.currentDay)
+}
+
+func (g *Game) nextPublicTurnID() string {
+	g.publicTurnSeq++
+	return fmt.Sprintf("day-%d-turn-%d", g.currentDay, g.publicTurnSeq)
 }
 
 func (g *Game) executePhase(actions []string) {
