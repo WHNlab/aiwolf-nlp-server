@@ -97,6 +97,9 @@ func (s *Server) serveStatic(c *gin.Context, fsys fs.FS, path string) {
 	// Content-Typeは拡張子で決める。embedの自動判定は未対応。
 	switch {
 	case strings.HasSuffix(path, ".html"):
+		// HTMLは毎回確認させ、更新時には新しいCSS/JSのURLを参照させる。
+		c.Header("Cache-Control", "no-store")
+		data = []byte(strings.ReplaceAll(string(data), "__ASSET_VERSION__", web.AssetVersion))
 		c.Data(http.StatusOK, "text/html; charset=utf-8", data)
 	case strings.HasSuffix(path, ".css"):
 		c.Data(http.StatusOK, "text/css; charset=utf-8", data)

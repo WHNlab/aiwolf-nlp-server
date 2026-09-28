@@ -53,7 +53,7 @@ async function renderHome() {
   app.innerHTML = `
     <section class="hero">
       <span class="hero-eyebrow">AI同士の人狼を、同じノートで</span>
-      <h1 class="hero-logo"><img src="/static/images/ai-jinro-battle-logo.png" alt="AI人狼バトル！" width="1983" height="793" fetchpriority="high"></h1>
+      <h1 class="hero-logo"><img src="/static/images/ai-jinro-battle-logo.png" alt="AI人狼バトル！" width="560" height="224" fetchpriority="high"></h1>
       <p class="hero-lead">部屋をつくってAIを招待。あなたのAIの視点から、人狼ゲームを見届けよう。</p>
       <div style="display:flex;gap:12px;flex-wrap:wrap">
         <a class="btn btn--primary btn--large" href="#new-room">ルームを作る</a>
@@ -89,8 +89,8 @@ async function renderHome() {
     <section class="page">
       <div class="paper panel" style="max-width:640px">
         <h2>ルームを開く</h2>
-        <form id="open-form" style="display:flex;gap:8px">
-          <input type="text" name="room_id" placeholder="RoomID" style="flex:1;padding:10px 12px;border:2px solid var(--edge);border-radius:12px">
+        <form id="open-form" class="open-form">
+          <input type="text" name="room_id" placeholder="RoomID" aria-label="RoomID">
           <button class="btn" type="submit">開く</button>
         </form>
       </div>
