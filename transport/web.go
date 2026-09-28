@@ -75,6 +75,7 @@ func (s *Server) buildWebRouter() *gin.Engine {
 	})
 
 	rooms := api.Group("/rooms")
+	rooms.GET("", s.handleListRooms)
 	rooms.POST("", s.handleCreateRoom)
 	rooms.POST("/:id/join", s.checkOrigin(), s.handleJoinRoom)
 	rooms.POST("/:id/leave", s.checkOrigin(), s.handleLeaveRoom)
@@ -237,16 +238,19 @@ func (s *Server) handleCreateRoom(c *gin.Context) {
 		UserName   string `json:"user_name"`
 		AgentCount int    `json:"agent_count"`
 		Mode       string `json:"mode"`
+		IsPublic   *bool  `json:"is_public"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "不正なリクエストです"})
 		return
 	}
+	isPublic := body.IsPublic == nil || *body.IsPublic
 	r, err := s.roomManager.CreateRoom(sess, room.CreateParams{
 		RoomName:   body.RoomName,
 		UserName:   body.UserName,
 		AgentCount: body.AgentCount,
 		Mode:       body.Mode,
+		Public:     isPublic,
 	})
 	if err != nil {
 		jsonError(c, err)
@@ -256,6 +260,20 @@ func (s *Server) handleCreateRoom(c *gin.Context) {
 		s.setSessionCookie(c, sess)
 	}
 	c.JSON(http.StatusOK, r.Project(sess))
+}
+
+func (s *Server) handleListRooms(c *gin.Context) {
+	status := c.DefaultQuery("status", "active")
+	if status != "active" && status != "finished" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "状態が不正です"})
+		return
+	}
+	q := c.Query("q")
+	if len([]rune(q)) > 100 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "検索語が長すぎます"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"rooms": s.roomManager.ListRooms(status, q)})
 }
 
 func (s *Server) handleJoinRoom(c *gin.Context) {

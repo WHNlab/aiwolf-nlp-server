@@ -45,13 +45,14 @@ curl -H "Authorization: Bearer <TOKEN>" http://127.0.0.1:8080/api/v1/games
 | エンドポイント | 説明 |
 | --- | --- |
 | `GET /api/v1/room-presets` | 対応している人数・役職構成・通信方式の一覧 |
-| `POST /api/v1/rooms` | ルームを作成する (body: `room_name`, `user_name`, `agent_count`, `mode`) |
+| `GET /api/v1/rooms?status=active|finished&q=検索語` | 公開ルームの一覧。`active`（既定）は待機・開始中・進行中、`finished` は終了・中断した対戦記録。新しい順に最大50件 |
+| `POST /api/v1/rooms` | ルームを作成する (body: `room_name`, `user_name`, `agent_count`, `mode`, `is_public`。公開が既定) |
 | `POST /api/v1/rooms/{id}/join` | 入室する (body: `name`, `mode`。mode=participate なら席を確保) |
 | `POST /api/v1/rooms/{id}/leave` | 待機中に退室する |
 | `POST /api/v1/rooms/{id}/close` | ホストが部屋を閉じる |
 | `POST /api/v1/rooms/{id}/start` | ホストがゲームを開始する (全席にAI接続済みであること) |
-| `POST /api/v1/rooms/{id}/claim` | キーフレーズを検証して自分のAIの視点を解放する (body: `phrase`) |
-| `POST /api/v1/rooms/{id}/consultations` | 自分のAIへ助言を送る (body: `text`。生存中・視点解放済みのみ) |
+| `POST /api/v1/rooms/{id}/claim` | 旧クライアント用のキーフレーズ確認 (body: `phrase`。Webでは不要) |
+| `POST /api/v1/rooms/{id}/consultations` | 自分のAIへ助言を送る (body: `text`。自分の席が生存中のみ) |
 | `GET /api/v1/rooms/{id}/consultations` | 自分とAIの個別のやり取り一覧 |
 | `GET /api/v1/rooms/{id}/invite` | 自分の席のAI接続URL (`room_id` + `seat_token`) と案内文を返す |
 | `GET /api/v1/rooms/{id}` | ルームの現在状態。閲覧者の視点に応じて役職をマスクする |
@@ -63,6 +64,10 @@ curl -H "Authorization: Bearer <TOKEN>" http://127.0.0.1:8080/api/v1/games
 進行だけが変化した場合も SSE の `room` 更新が送られます。これは履歴 `seq` が増えない場合があります。翌日に公開される投票など、既存履歴の公開可否が変化したときは、日付・状態・視点の変更通知を受けて `GET /history` を cursor なしで再取得してください。cursor 指定は新しい seq のイベントだけを返します。
 
 視点 (`viewer.view_mode`) は `public` / `agent` / `omniscient` の3種類です。+ゲーム終了・中断後、または自分のAIが死亡した閲覧者は `omniscient` となり、役職・襲撃投票などを含む全情報が見えます。
+
+入室時のCookieに紐づく席の所有者は、ゲーム開始後に自分のAIの役職・個別情報を自動で見られます。観戦者は公開視点のままです。`is_public: false` のルームは一覧・検索から除外されますが、RoomIDを知る人は直接開けます。終了後は公開・非公開ともRoomIDから神視点で見られます。
+
+終了・中断した試合は公開可能なイベントと席情報をJSONで30日間保存します。個別相談、接続トークン、キーフレーズ、Cookieは保存しません。再起動後も試合画面と履歴を開けますが、進行中の試合と個別相談は復元しません。保存先は `AIWOLF_REPLAY_DIR` 環境変数（既定 `./data/room-replays`）で指定します。Docker Composeでは永続ボリュームを `/data` に割り当てます。期限切れの記録は起動時またはルーム参照時に削除されます。
 
 追放・襲撃で死亡が確定すると、そのイベントと同時に席の生死・本人の視点・助言送信可否を更新します。護衛されたAIの生死は変えません。
 

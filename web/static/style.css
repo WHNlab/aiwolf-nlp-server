@@ -52,6 +52,7 @@ body::before {
 }
 
 [hidden] { display: none !important; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .container { max-width: 1440px; margin: 0 auto; padding: 0 32px; }
 
 /* header */
@@ -185,6 +186,24 @@ body::before {
 .home-disclosure summary:focus-visible { outline: 3px solid var(--focus); outline-offset: -5px; border-radius: var(--radius-panel); }
 .home-disclosure[open] summary { border-bottom: 1px solid var(--rule); }
 .home-disclosure-content { min-width: 0; padding: 20px; }
+.room-directory { padding: 10px 0 18px; }
+.directory-heading { display: flex; align-items: end; justify-content: space-between; gap: 12px; }
+.directory-heading h2 { margin: 0 0 10px; font-size: 1.3rem; }
+.directory-heading .field-hint { margin-bottom: 12px; }
+.room-directory input[type="search"] { width: 100%; padding: 11px 14px; border: 2px solid var(--edge); border-radius: var(--radius-control); background: var(--white); color: var(--ink); font: inherit; }
+.room-directory input[type="search"]:focus { outline: 3px solid var(--focus); outline-offset: 2px; }
+.directory-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.directory-columns .panel { margin: 0; }
+.directory-list { display: grid; gap: 10px; max-height: 430px; overflow-y: auto; padding: 4px 5px 8px 1px; }
+.directory-empty { margin: 10px 0; }
+.directory-card { display: flex; justify-content: space-between; align-items: center; gap: 10px; min-width: 0; padding: 12px 14px; border: 1.5px solid var(--edge); border-radius: 12px; background: var(--white); color: var(--ink); text-decoration: none; box-shadow: 0 3px 0 var(--paper-edge); }
+.directory-card:hover { background: #f3fbf6; transform: translateY(-1px); }
+.directory-card:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.directory-card-main, .directory-card-side { display: grid; gap: 2px; min-width: 0; }
+.directory-card-main strong { overflow-wrap: anywhere; }
+.directory-card-main small { color: var(--ink-muted); overflow-wrap: anywhere; }
+.directory-card-side { flex: none; justify-items: end; text-align: right; }
+.directory-card-side small { color: var(--ink-muted); }
 .setup-panel p { margin: 12px 0 16px; }
 .setup-prompt {
   width: 100%; min-height: 250px; padding: 12px; resize: vertical;
@@ -291,6 +310,8 @@ body::before {
   .hero { padding: 20px 0 16px; }
   .hero-logo { margin: 10px 0 12px; }
   .hero-lead { margin-bottom: 16px; }
+  .directory-columns { grid-template-columns: minmax(0, 1fr); }
+  .directory-heading .field-hint { display: none; }
   .brand img { width: 110px; }
   .setup-prompt { font-size: 1rem; }
   .invite-box .btn { max-width: 100%; white-space: normal; text-align: center; }
