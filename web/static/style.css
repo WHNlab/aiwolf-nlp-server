@@ -229,6 +229,7 @@ body::before {
 
 /* timeline */
 .timeline { display: flex; flex-direction: column; gap: 10px; }
+.timeline > :last-child { scroll-margin-bottom: 24px; }
 .talk-entry {
   display: flex; gap: 10px; padding: 10px 12px;
   background: var(--white); border: 1.5px solid var(--rule); border-radius: 12px;
@@ -247,6 +248,10 @@ body::before {
 .event-sys { font-size: 0.82rem; color: var(--ink-muted); text-align: center; padding: 6px; }
 .event-whisper { background: var(--purple); border-radius: 10px; text-align: left; padding: 8px 12px; }
 .event-whisper .talk-text { font-size: 0.9rem; }
+#new-msg-bar {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  z-index: 45; text-align: center;
+}
 
 /* keyphrase card */
 .key-card { border: 2px dashed var(--edge); border-radius: 14px; padding: 14px; background: var(--paper); }
@@ -303,5 +308,7 @@ body::before {
     gap: 8px;
   }
   .mobile-tabs .btn { flex: 1; min-height: 44px; font-size: 0.8rem; padding: 6px 8px; }
+  #new-msg-bar { bottom: calc(82px + env(safe-area-inset-bottom)); }
+  .timeline > :last-child { scroll-margin-bottom: calc(92px + env(safe-area-inset-bottom)); }
   .page { padding-bottom: 96px; }
 }

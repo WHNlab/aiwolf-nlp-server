@@ -56,7 +56,7 @@ curl -H "Authorization: Bearer <TOKEN>" http://127.0.0.1:8080/api/v1/games
 | `GET /api/v1/rooms/{id}/invite` | 自分の席のAI接続URL (`room_id` + `seat_token`) と案内文を返す |
 | `GET /api/v1/rooms/{id}` | ルームの現在状態。閲覧者の視点に応じて役職をマスクする |
 | `GET /api/v1/rooms/{id}/history?cursor=N` | 閲覧権限でフィルタしたイベント履歴 (seq > cursor) |
-| `GET /api/v1/rooms/{id}/events` | イベント配信 (SSE、イベント名 `room`) |
+| `GET /api/v1/rooms/{id}/events` | イベント配信 (SSE、更新通知 `room` と接続維持 `heartbeat`) |
 
 視点 (`viewer.view_mode`) は `public` / `agent` / `omniscient` の3種類です。+ゲーム終了・中断後、または自分のAIが死亡した閲覧者は `omniscient` となり、役職・襲撃投票などを含む全情報が見えます。
 

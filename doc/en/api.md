@@ -56,7 +56,7 @@ When `server.web.enable` is `true`, a separate HTTP server for the Web UI (`serv
 | `GET /api/v1/rooms/{id}/invite` | Returns the agent connection URL (`room_id` + `seat_token`) and guide text for your seat |
 | `GET /api/v1/rooms/{id}` | Current room state; roles are masked according to the viewer's perspective |
 | `GET /api/v1/rooms/{id}/history?cursor=N` | Event history filtered by viewing permission (seq > cursor) |
-| `GET /api/v1/rooms/{id}/events` | Event stream (SSE, event name `room`) |
+| `GET /api/v1/rooms/{id}/events` | Event stream (SSE, `room` update notices and `heartbeat` keepalives) |
 
 The viewpoint (`viewer.view_mode`) is one of `public` / `agent` / `omniscient`.+After the game ends or is aborted, and for viewers whose own agent has died, the viewpoint becomes `omniscient` and all information including roles and attack votes is visible.
 

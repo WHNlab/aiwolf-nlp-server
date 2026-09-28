@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aiwolfdial/aiwolf-nlp-server/room"
 	"github.com/aiwolfdial/aiwolf-nlp-server/web"
@@ -362,6 +363,10 @@ func (s *Server) handleRoomEvents(c *gin.Context) {
 		return
 	}
 	defer cancel()
+	c.Header("Cache-Control", "no-cache, no-transform")
+	c.Header("X-Accel-Buffering", "no")
+	heartbeat := time.NewTicker(25 * time.Second)
+	defer heartbeat.Stop()
 	c.Stream(func(w io.Writer) bool {
 		select {
 		case payload, ok := <-ch:
@@ -369,6 +374,9 @@ func (s *Server) handleRoomEvents(c *gin.Context) {
 				return false
 			}
 			c.SSEvent("room", string(payload))
+			return true
+		case <-heartbeat.C:
+			c.SSEvent("heartbeat", "{}")
 			return true
 		case <-c.Request.Context().Done():
 			return false

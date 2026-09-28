@@ -6,8 +6,8 @@ const viewBadge = $('#view-badge');
 const connBadge = $('#conn-badge');
 const headerRoom = $('#header-room-name');
 
-let state = { room: null, events: [], cursor: 0, es: null, invite: null };
-let es = null;
+let state = { room: null, events: [], cursor: 0 };
+let feed = null;
 
 function toast(msg, ms = 2200) {
   toastEl.textContent = msg;
@@ -54,6 +54,7 @@ async function copyTextarea(textarea, successMessage) {
 
 // ---- ルーティング ----
 function route() {
+  stopUpdates();
   const h = location.hash || '#/';
   const m = h.match(/^#\/rooms\/([A-Za-z0-9]+)/);
   if (m) return renderRoom(m[1]);
@@ -62,8 +63,10 @@ function route() {
 
 // ---- Home ----
 async function renderHome() {
+  state.room = null;
   headerRoom.textContent = '';
   viewBadge.hidden = true;
+  connBadge.hidden = true;
   document.body.dataset.page = 'home';
   let presets = [];
   try {
@@ -165,7 +168,10 @@ async function renderHome() {
 
 // ---- Room ----
 async function renderRoom(roomId) {
+  stopUpdates();
   document.body.dataset.page = 'room';
+  state.events = [];
+  state.cursor = 0;
   let data;
   try { data = await api('/api/v1/rooms/' + roomId); }
   catch (e) {
@@ -177,8 +183,9 @@ async function renderRoom(roomId) {
   updateViewBadge(data.viewer);
 
   if (!data.viewer.joined && data.status === 'waiting') return renderJoin(data);
-  await refreshHistory(roomId, 0);
+  try { await refreshHistory(roomId, 0); } catch (_) { /* 通知の再接続時に再取得する */ }
   renderRoomView(data);
+  scrollToLatest();
   subscribeEvents(roomId);
 }
 
@@ -221,22 +228,34 @@ function renderJoin(data) {
         body: JSON.stringify({ name: f.name.value, mode: f.mode.value }),
       });
       state.room = out;
+      try { await refreshHistory(out.room_id, 0); } catch (_) { /* 通知の再接続時に再取得する */ }
       renderRoomView(out);
+      scrollToLatest();
       subscribeEvents(out.room_id);
-      await refreshHistory(out.room_id, 0);
     } catch (ex) { err.textContent = ex.message; err.hidden = false; }
   };
 }
 
-async function refreshHistory(roomId, cursor) {
-  try {
-    const d = await api(`/api/v1/rooms/${roomId}/history?cursor=${cursor}`);
-    state.events = (d.events || []);
-    state.cursor = d.cursor;
-  } catch (e) { /* 履歴取得失敗は既存表示を維持 */ }
+async function refreshHistory(roomId, cursor, current = null) {
+  const d = await api(`/api/v1/rooms/${roomId}/history?cursor=${cursor}`);
+  if (state.room?.room_id !== roomId || (current && !current.active)) return 0;
+  if (cursor === 0) state.events = d.events || [];
+  else state.events.push(...(d.events || []));
+  state.cursor = d.cursor;
+  return (d.events || []).length;
 }
 
-function renderRoomView(data) {
+function renderRoomView(data, hasNewEvents = false) {
+  const previousTimeline = $('#timeline');
+  const followLatest = !previousTimeline || isLatestVisible();
+  const previousScroll = window.scrollY;
+  const mobileView = $('#room-grid')?.className || 'room-grid';
+  const inviteOpen = $('#invite-detail') && !$('#invite-detail').hidden;
+  const inviteText = $('#invite-text')?.value || '';
+  const consultText = $('#consult-form textarea')?.value || '';
+  const claimText = $('#claim-form input')?.value || '';
+  const focusedField = document.activeElement === $('#consult-form textarea') ? 'consult'
+    : document.activeElement === $('#claim-form input') ? 'claim' : '';
   const status = data.status;
   const v = data.viewer;
   const leftCol = seatListHtml(data);
@@ -263,7 +282,17 @@ function renderRoomView(data) {
       <button class="btn btn--small" data-tab="talk">会話</button>
       <button class="btn btn--small" data-tab="ai">自分のAI</button>
     </nav>`;
+  if ($('#room-grid')) $('#room-grid').className = mobileView;
+  if (inviteOpen && $('#invite-detail')) {
+    $('#invite-detail').hidden = false;
+    $('#invite-text').value = inviteText;
+  }
+  if ($('#consult-form textarea')) $('#consult-form textarea').value = consultText;
+  if ($('#claim-form input')) $('#claim-form input').value = claimText;
   bindRoomEvents(data);
+  renderTimeline(followLatest, hasNewEvents);
+  if (previousTimeline && !followLatest) window.scrollTo(0, previousScroll);
+  if (focusedField) $(focusedField === 'consult' ? '#consult-form textarea' : '#claim-form input')?.focus({ preventScroll: true });
 }
 
 function statusLabel(s) {
@@ -375,14 +404,39 @@ function gameHtml(data) {
       ${data.viewer.view_mode === 'omniscient' ? '<span class="chip">全情報</span>' : ''}
     </div>
     <div class="timeline" id="timeline"></div>
-    <div id="new-msg-bar" hidden style="text-align:center;margin-top:10px">
+    <div id="new-msg-bar" hidden>
       <button class="btn btn--small" id="btn-jump">新しい発言 ↓</button>
     </div>
     <div id="result-area"></div>
   </div>`;
 }
 
-function renderTimeline() {
+function isLatestVisible() {
+  const tl = $('#timeline');
+  if (!tl || !tl.getClientRects().length) return false;
+  const last = tl.lastElementChild;
+  if (!last) return true;
+  const rect = last.getBoundingClientRect();
+  return rect.bottom >= 64 && rect.top <= window.innerHeight && rect.bottom <= window.innerHeight + 100;
+}
+
+function scrollToLatest() {
+  const tl = $('#timeline');
+  if (!tl || !state.events.length) return;
+  if (!tl.getClientRects().length) {
+    // スマホで別タブを見ているときも、新着ボタンから会話へ移動できる。
+    const grid = $('#room-grid');
+    if (grid?.classList.contains('mobile-participants') || grid?.classList.contains('mobile-ai')) {
+      grid.classList.remove('mobile-participants', 'mobile-ai');
+      requestAnimationFrame(scrollToLatest);
+    }
+    return;
+  }
+  tl.lastElementChild?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+  if ($('#new-msg-bar')) $('#new-msg-bar').hidden = true;
+}
+
+function renderTimeline(followLatest = isLatestVisible(), hasNewEvents = false) {
   const tl = $('#timeline');
   if (!tl) return;
   let html = '';
@@ -395,6 +449,8 @@ function renderTimeline() {
     html += eventHtml(e);
   }
   tl.innerHTML = html || '<div class="empty">ゲームが始まると、ここに会話が記録されます</div>';
+  if (followLatest) requestAnimationFrame(scrollToLatest);
+  else if (hasNewEvents && $('#new-msg-bar')) $('#new-msg-bar').hidden = false;
 }
 
 function isNightGuess(e) { return e.type === 'day' && e.day > 0 && false; }
@@ -491,35 +547,85 @@ function bindRoomEvents(data) {
       if (b.dataset.tab === 'ai') g.classList.add('mobile-ai');
     };
   });
-  renderTimeline();
+  const jump = $('#btn-jump');
+  if (jump) jump.onclick = scrollToLatest;
+}
+
+function stopUpdates() {
+  if (!feed) return;
+  feed.active = false;
+  feed.es.close();
+  clearInterval(feed.pollTimer);
+  feed = null;
+}
+
+function roomViewKey(data) {
+  if (!data) return '';
+  return JSON.stringify([data.name, data.status, data.connected, data.day, data.seats,
+    data.viewer, data.private_agent, data.roles, data.win_side, data.abort_reason]);
+}
+
+async function syncRoom(current) {
+  if (!current.active || state.room?.room_id !== current.roomId) return;
+  if (current.syncing) { current.queued = true; return; }
+  current.syncing = true;
+  try {
+    do {
+      current.queued = false;
+      const fresh = await api('/api/v1/rooms/' + current.roomId);
+      if (!current.active || state.room?.room_id !== current.roomId) return;
+      const viewChanged = state.room.viewer.view_mode !== fresh.viewer.view_mode;
+      const changed = roomViewKey(state.room) !== roomViewKey(fresh);
+      let newEvents = 0;
+      if (viewChanged || fresh.cursor > state.cursor) {
+        newEvents = await refreshHistory(current.roomId, viewChanged ? 0 : state.cursor, current);
+        if (!current.active) return;
+      }
+      state.room = fresh;
+      headerRoom.textContent = fresh.name;
+      updateViewBadge(fresh.viewer);
+      if (changed) renderRoomView(fresh, newEvents > 0);
+      else if (newEvents) renderTimeline(isLatestVisible(), true);
+      if (['finished', 'aborted', 'closed'].includes(fresh.status)) {
+        stopUpdates();
+        connBadge.hidden = true;
+        return;
+      }
+    } while (current.queued);
+  } catch (_) {
+    // SSEの再接続または定期確認で再試行する。既存の表示は残す。
+  } finally {
+    current.syncing = false;
+  }
 }
 
 function subscribeEvents(roomId) {
-  if (es) es.close();
-  es = new EventSource(`/api/v1/rooms/${roomId}/events`);
-  connBadge.hidden = false; connBadge.textContent = '接続中'; connBadge.classList.remove('off');
-  es.onmessage = async (m) => {
-    try {
-      const d = JSON.parse(m.data);
-      if (d.type === 'room') {
-        const fresh = await api('/api/v1/rooms/' + roomId);
-        state.room = fresh;
-        renderRoomView(fresh);
-      } else if (d.type === 'event') {
-        state.events.push(d.event);
-        renderTimeline();
-      }
-    } catch (_) {}
+  stopUpdates();
+  const current = { roomId, active: true, syncing: false, queued: false, es: null, pollTimer: null };
+  feed = current;
+  current.es = new EventSource(`/api/v1/rooms/${roomId}/events`);
+  connBadge.hidden = false;
+  connBadge.textContent = '接続中';
+  connBadge.classList.remove('off');
+  current.es.addEventListener('room', () => syncRoom(current));
+  current.es.onopen = () => {
+    if (!current.active) return;
+    connBadge.textContent = '接続中';
+    connBadge.classList.remove('off');
+    syncRoom(current);
   };
-  es.onerror = () => {
+  current.es.onerror = () => {
+    if (!current.active) return;
     connBadge.textContent = '再接続中';
     connBadge.classList.add('off');
   };
+  // SSEが中継で滞留した場合にも履歴カーソルから追いつく。
+  current.pollTimer = setInterval(() => syncRoom(current), 10000);
 }
 
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-window.addEventListener('hashchange', () => { if (es) es.close(); route(); });
+window.addEventListener('hashchange', route);
 route();

@@ -2,6 +2,8 @@
 
 [日本語](../ja/web-ui-design.md)
 
+See [Tabletop Spectator UI Design v1](tabletop-ui-design.md) for the updated match-screen proposal. Its table, current-speech, and on-demand history design supersedes the corresponding sections here; joining and perspective-control principles remain applicable.
+
 Status: proposed specification, not yet implemented. 2026-09-28. Distinguish existing functionality from proposed contracts. This document is shared by UI and backend implementers; working mocks do not establish that the server feature exists.
 
 ## 1. Purpose and decisions
