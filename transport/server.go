@@ -77,6 +77,9 @@ func NewServer(config model.Config) (*Server, error) {
 	server.manager = orchestrator.NewGameManager(config, gameSettings, matchmaking.NewWaitingRoom(config), matchOptimizer, server.newObserver)
 	if config.Server.Web.Enable {
 		server.roomManager = room.NewManager(config, server.newObserver)
+		if err := server.roomManager.InitArchive(); err != nil {
+			return nil, err
+		}
 	}
 	return server, nil
 }

@@ -45,13 +45,14 @@ When `server.web.enable` is `true`, a separate HTTP server for the Web UI (`serv
 | Endpoint | Description |
 | --- | --- |
 | `GET /api/v1/room-presets` | List of supported player counts, role compositions, and communication modes |
-| `POST /api/v1/rooms` | Create a room (body: `room_name`, `user_name`, `agent_count`, `mode`) |
+| `GET /api/v1/rooms?status=active|finished&q=query` | List public rooms. `active` (default) includes waiting, starting, and running rooms; `finished` includes completed and aborted replays. Newest first, up to 50 |
+| `POST /api/v1/rooms` | Create a room (body: `room_name`, `user_name`, `agent_count`, `mode`, `is_public`; public by default) |
 | `POST /api/v1/rooms/{id}/join` | Join a room (body: `name`, `mode`; mode=participate reserves a seat) |
 | `POST /api/v1/rooms/{id}/leave` | Leave while the room is waiting |
 | `POST /api/v1/rooms/{id}/close` | The host closes the room |
 | `POST /api/v1/rooms/{id}/start` | The host starts the game (all seats must have an agent connected) |
-| `POST /api/v1/rooms/{id}/claim` | Verify the key phrase to unlock your own agent's viewpoint (body: `phrase`) |
-| `POST /api/v1/rooms/{id}/consultations` | Send advice to your own agent (body: `text`; only while alive and after unlocking) |
+| `POST /api/v1/rooms/{id}/claim` | Legacy key phrase verification (body: `phrase`; not needed in the Web UI) |
+| `POST /api/v1/rooms/{id}/consultations` | Send advice to your own agent (body: `text`; only while your seat is alive) |
 | `GET /api/v1/rooms/{id}/consultations` | List the private exchanges between you and your agent |
 | `GET /api/v1/rooms/{id}/invite` | Returns the agent connection URL (`room_id` + `seat_token`) and guide text for your seat |
 | `GET /api/v1/rooms/{id}` | Current room state; roles are masked according to the viewer's perspective |
@@ -63,6 +64,10 @@ The `progress` field in `GET /api/v1/rooms/{id}` contains public game progress. 
 SSE sends a `room` notice when progress changes, even if the history `seq` does not. When the visibility of existing history changes, such as votes revealed on the following day, refetch `GET /history` without a cursor after a day, status, or viewpoint update. A cursor only returns events with a newer seq.
 
 The viewpoint (`viewer.view_mode`) is one of `public` / `agent` / `omniscient`.+After the game ends or is aborted, and for viewers whose own agent has died, the viewpoint becomes `omniscient` and all information including roles and attack votes is visible.
+
+After a game starts, a seat owner sees their own agent's role and private information automatically through the session cookie created on joining. Spectators remain in the public view. Rooms created with `is_public: false` are omitted from listings and search but can be opened by anyone who knows the RoomID. After the game, both public and private rooms can be viewed by RoomID from the omniscient perspective.
+
+Completed and aborted matches retain publicly viewable events and seat information as JSON for 30 days. Private consultations, connection tokens, key phrases, and cookies are never archived. Match pages and histories survive a restart; running matches and private consultations do not. Set `AIWOLF_REPLAY_DIR` to choose the storage path (default `./data/room-replays`). Docker Compose mounts a persistent volume at `/data`. Expired files are removed at startup or when rooms are accessed.
 
 When execution or attack confirms a death, the seat status, owner perspective, and advice permission update with that event. A successfully guarded agent remains alive.
 

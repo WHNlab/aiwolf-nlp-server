@@ -15,6 +15,8 @@ The server is running at the following addresses:
 
 Create a room in the Web UI and pass the issued connection URL (containing `room_id` and `seat_token`) to your agent.
 
+Public rooms can be searched and joined from the home page. Private rooms are omitted from the list and can be opened by people who know the RoomID. Publicly viewable conversations and results from completed matches are retained for 30 days and can be reopened from “Recent replays” or by RoomID. Compose stores them in the persistent `aiwolf-replays` volume. Matches that ended before this update were only held in memory and cannot be recovered.
+
 Copy the prompt under “AI setup” on the home page to your LLM, then join a room and send that same LLM your private invitation from the agent invitation panel. An LLM with command execution can use the player kit (CLI + SKILL) to play turn-based games without an additional LLM API key or MCP. [Participation guide](/doc/en/agent-kit.md)
 
 Compose defaults to `PUBLIC_WS_URL=wss://zinro-ws.nyaolab.com/ws`. Override this environment variable for other deployments.

@@ -110,6 +110,7 @@ $RECYCLE.BIN/
 /dist
 /log
 /cache
+/data
 __pycache__/
 *.pyc
 .venv/

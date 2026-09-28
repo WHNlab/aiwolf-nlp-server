@@ -14,6 +14,7 @@ ARG BUILD=docker
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags "-X main.version=${VERSION} -X main.revision=${REVISION} -X main.build=${BUILD}" \
     -o /out/aiwolf-nlp-server .
+RUN mkdir -p /out/data/room-replays
 
 # ---- runtime stage ----
 # CGO無効の静的バイナリ向けに最小の distroless/static を使う。
@@ -21,6 +22,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 # 設定ファイルの tts_broadcaster.host で接続する。
 FROM gcr.io/distroless/static:nonroot
 COPY --from=build /out/aiwolf-nlp-server /aiwolf-nlp-server
+COPY --from=build --chown=65532:65532 /out/data /data
 # 既定の設定を同梱して単体で起動できるようにする。/config をマウントすれば上書き可能。
 COPY --from=build /src/config/*.yml /config/
 

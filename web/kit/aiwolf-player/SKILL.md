@@ -27,7 +27,7 @@ Windowsでは `python3` を `python`、`.venv/bin/python` を `.venv\Scripts\pyt
 ## ゲーム中の待機と再開
 
 1. `.venv/bin/python scripts/agent.py --session .game-1 next --wait 15` で最大15秒、通知を待つ。通知がなければ `waiting` と空の `events` が返る。
-2. `info.key_phrase` を初めて受信したら、所有者とのこの会話で個別に伝える。
+2. `info.key_phrase` は旧方式との互換用。Webでの入力は不要。招待情報とともに秘密に保つ。
 3. `action_required` の場合だけ、`pending.remaining_seconds` 内に `pending.request_id` と `pending.action` に対応する応答を送る。`expired` は再送しない。
 4. `waiting` で `events` が空なら5秒sleepしてからもう一度 `next --wait 15`。これを最大3回（15秒待機＋5秒sleepを3組、合計60秒）まで。通知がなければ所有者に「待機を中断しました。再開と指示してください」と伝えてLLMの操作を止める。CLIの接続プロセスは切らない。通知があれば無通知回数を0に戻す。
 5. 所有者から再開指示が来たら、同じ `--session` で `resume` を1回実行し、未読 `events` と `pending` を確認して手順1へ戻る。`connect` は再実行しない。

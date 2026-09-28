@@ -11,6 +11,9 @@ const headerRoom = $('#header-room-name');
 
 let state = { room: null, events: [], cursor: 0 };
 let feed = null;
+let homeTimer = null;
+let homeSearchTimer = null;
+let routeRevision = 0;
 
 function toast(msg, ms = 2200) {
   toastEl.textContent = msg;
@@ -38,7 +41,7 @@ function setupPrompt() {
     '',
     '参加キットを取得・展開し、SKILL.mdを読んでください。接続用プログラムは作り直さず、付属CLIを使ってください。MCPや追加のLLM APIキーは不要です。',
     'まだルームへ接続しないでください。私がWebでAIの席を確保した後、自分専用の招待案内をこの会話で渡します。受け取ったらSKILLの手順で接続し、発言・投票などを判断してください。',
-    'ゲーム開始後、info.key_phraseを受け取ったら、この会話で私に個別に伝えてください。招待トークンやキーフレーズはゲーム内の発言に含めないでください。',
+    '招待トークンなどの接続情報はゲーム内の発言に含めないでください。',
     'Python 3.9以上、コマンド実行、外部WebSocket通信、コマンド間で存続するプロセスが必要です。使えない場合は接続を試みず、その制約を教えてください。',
   ].join('\n');
 }
@@ -57,17 +60,20 @@ async function copyTextarea(textarea, successMessage) {
 
 // ---- ルーティング ----
 function route() {
+  const revision = ++routeRevision;
   stopUpdates();
+  clearInterval(homeTimer);
+  clearTimeout(homeSearchTimer);
   destroyMatch();
   app.onclick = null;
   const h = location.hash || '#/';
   const m = h.match(/^#\/rooms\/([A-Za-z0-9]+)/);
-  if (m) return renderRoom(m[1]);
-  return renderHome();
+  if (m) return renderRoom(m[1], revision);
+  return renderHome(revision);
 }
 
 // ---- Home ----
-async function renderHome() {
+async function renderHome(revision) {
   state.room = null;
   headerRoom.textContent = '';
   viewBadge.hidden = true;
@@ -78,6 +84,7 @@ async function renderHome() {
     const d = await api('/api/v1/room-presets');
     presets = d.presets || [];
   } catch (e) { presets = []; }
+  if (revision !== routeRevision) return;
   const cards = presets.map(p => `
     <label class="radio-card">
       <input type="radio" name="agent_count" value="${p.agent_count}" ${p.agent_count === 5 ? 'checked' : ''}>
@@ -88,6 +95,14 @@ async function renderHome() {
       <h1 class="hero-logo"><img src="/static/images/ai-jinro-battle-logo.png" alt="AI人狼バトル！" width="560" height="224" fetchpriority="high"></h1>
       <p class="hero-lead">あなたのLLMを出場させよう！</p>
       <a class="btn btn--primary btn--large" href="#ai-setup">AIのセットアップ</a>
+    </section>
+    <section class="room-directory" aria-label="公開ルーム">
+      <div class="directory-heading"><div><span class="owner-eyebrow">ROOMS</span><h2>公開ルーム</h2></div><p class="field-hint">ルーム名・RoomIDで検索</p></div>
+      <label class="field"><span class="sr-only">公開ルームを検索</span><input id="room-search" type="search" placeholder="ルーム名・RoomIDで検索" autocomplete="off"></label>
+      <div class="directory-columns">
+        <section class="paper panel"><h3>開催中のルーム</h3><div id="active-rooms" class="directory-list" aria-live="polite"><p class="field-hint">読み込み中…</p></div></section>
+        <section class="paper panel"><h3>最近の対戦記録</h3><p class="field-hint">終了後30日間、会話と試合の流れを見返せます。</p><div id="finished-rooms" class="directory-list" aria-live="polite"><p class="field-hint">読み込み中…</p></div></section>
+      </div>
     </section>
     <div class="home-grid">
       <div class="home-actions">
@@ -110,6 +125,14 @@ async function renderHome() {
                 <span class="card-inner">AIも参加<small>自分のAIを1席確保</small></span></label>
               <label class="radio-card"><input type="radio" name="mode" value="spectate">
                 <span class="card-inner">観戦のみ<small>友達のAIだけで対戦</small></span></label>
+            </div>
+          </div>
+          <div class="field"><span class="field-label">公開設定</span>
+            <div class="radio-cards">
+              <label class="radio-card"><input type="radio" name="is_public" value="true" checked>
+                <span class="card-inner">公開<small>一覧・検索に表示</small></span></label>
+              <label class="radio-card"><input type="radio" name="is_public" value="false">
+                <span class="card-inner">非公開<small>URLを知る人だけ</small></span></label>
             </div>
           </div>
           <div id="create-error" class="field-error" hidden></div>
@@ -140,6 +163,28 @@ async function renderHome() {
     </section>
     </div>`;
   $('#setup-prompt').value = setupPrompt();
+  const showDirectory = (target, rooms, empty) => {
+    const el = $(target);
+    if (!el) return;
+    el.innerHTML = rooms.length ? rooms.map(r => {
+      const when = r.finished_at && !r.finished_at.startsWith('0001') ? new Date(r.finished_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+      const detail = ['finished', 'aborted'].includes(r.status) ? `${r.agent_count}人 · ${when}` : r.status === 'waiting' ? `${r.connected}/${r.agent_count} AI接続` : `${r.agent_count}人 · ${r.day || 0}日目`;
+      return `<a class="directory-card" href="#/rooms/${encodeURIComponent(r.room_id)}"><span class="directory-card-main"><strong>${escapeHtml(r.name)}</strong><small>RoomID ${escapeHtml(r.room_id)}</small></span><span class="directory-card-side"><span class="chip ${r.status === 'running' ? 'chip-live' : ''}">${statusLabel(r.status)}</span><small>${escapeHtml(detail)}</small></span></a>`;
+    }).join('') : `<p class="field-hint directory-empty">${empty}</p>`;
+  };
+  let directoryRequest = 0;
+  const loadDirectory = async () => {
+    if (document.body.dataset.page !== 'home' || revision !== routeRevision) return;
+    const request = ++directoryRequest;
+    const q = encodeURIComponent($('#room-search')?.value.trim() || '');
+    const results = await Promise.allSettled(['active', 'finished'].map(status => api(`/api/v1/rooms?status=${status}&q=${q}`)));
+    if (document.body.dataset.page !== 'home' || revision !== routeRevision || request !== directoryRequest) return;
+    showDirectory('#active-rooms', results[0].status === 'fulfilled' ? results[0].value.rooms || [] : [], results[0].status === 'fulfilled' ? '現在、公開中のルームはありません。' : 'ルームを読み込めませんでした。');
+    showDirectory('#finished-rooms', results[1].status === 'fulfilled' ? results[1].value.rooms || [] : [], results[1].status === 'fulfilled' ? 'まだ対戦記録はありません。' : '対戦記録を読み込めませんでした。');
+  };
+  $('#room-search').oninput = () => { clearTimeout(homeSearchTimer); homeSearchTimer = setTimeout(loadDirectory, 220); };
+  loadDirectory();
+  homeTimer = setInterval(loadDirectory, 12000);
   $('#btn-copy-setup').onclick = () => copyTextarea($('#setup-prompt'), 'AIへの説明をコピーしました');
   $('#create-form').onsubmit = async (e) => {
     e.preventDefault();
@@ -156,6 +201,7 @@ async function renderHome() {
           user_name: f.user_name.value,
           agent_count: Number(f.agent_count.value || 5),
           mode: f.mode.value,
+          is_public: f.is_public.value === 'true',
         }),
       });
       location.hash = '#/rooms/' + data.room_id;
@@ -172,7 +218,7 @@ async function renderHome() {
 }
 
 // ---- Room ----
-async function renderRoom(roomId) {
+async function renderRoom(roomId, revision = routeRevision) {
   stopUpdates();
   document.body.dataset.page = 'room';
   state.events = [];
@@ -180,17 +226,21 @@ async function renderRoom(roomId) {
   let data;
   try { data = await api('/api/v1/rooms/' + roomId); }
   catch (e) {
+    if (revision !== routeRevision) return;
     app.innerHTML = `<div class="page"><div class="paper panel empty">${escapeHtml(e.message)}</div></div>`;
     return;
   }
+  if (revision !== routeRevision) return;
   state.room = data;
   headerRoom.textContent = data.name;
   updateViewBadge(data.viewer);
 
-  if (!data.viewer.joined && data.status === 'waiting') return renderJoin(data);
+  if (!data.viewer.joined && ['waiting', 'starting', 'running'].includes(data.status)) return renderJoin(data);
   try { await refreshHistory(roomId, 0); } catch (_) { /* 通知の再接続時に再取得する */ }
+  if (revision !== routeRevision) return;
   renderRoomView(data);
-  subscribeEvents(roomId);
+  if (['waiting', 'starting', 'running'].includes(data.status)) subscribeEvents(roomId);
+  else { connBadge.hidden = true; document.body.classList.remove('connection-lost'); }
 }
 
 function updateViewBadge(v) {
@@ -209,14 +259,14 @@ function renderJoin(data) {
         <label class="field"><span class="field-label">あなたの名前</span>
           <input type="text" name="name" maxlength="24" required placeholder="例: ゆうき">
         </label>
-        <div class="field"><span class="field-label">参加方法</span>
+        ${data.status === 'waiting' ? `<div class="field"><span class="field-label">参加方法</span>
           <div class="radio-cards">
             <label class="radio-card"><input type="radio" name="mode" value="participate" checked>
               <span class="card-inner">AIも参加</span></label>
             <label class="radio-card"><input type="radio" name="mode" value="spectate">
               <span class="card-inner">観戦のみ</span></label>
           </div>
-        </div>
+        </div>` : '<p class="field-hint">試合は始まっています。観戦者として入室できます。</p><input type="hidden" name="mode" value="spectate">'}
         <div id="join-error" class="field-error" hidden></div>
         <button class="btn btn--primary btn--large" type="submit" style="width:100%">入室する</button>
       </form>
@@ -234,7 +284,7 @@ function renderJoin(data) {
       state.room = out;
       try { await refreshHistory(out.room_id, 0); } catch (_) { /* 通知の再接続時に再取得する */ }
       renderRoomView(out);
-          subscribeEvents(out.room_id);
+      if (['waiting', 'starting', 'running'].includes(out.status)) subscribeEvents(out.room_id);
     } catch (ex) { err.textContent = ex.message; err.hidden = false; }
   };
 }
@@ -254,9 +304,7 @@ function renderRoomView(data, hasNewEvents = false, previousRoom = null) {
   const inviteOpen = $('#invite-detail') && !$('#invite-detail').hidden;
   const inviteText = $('#invite-text')?.value || '';
   const consultText = $('#consult-form textarea')?.value || '';
-  const claimText = $('#claim-form input')?.value || '';
-  const focusedField = document.activeElement === $('#consult-form textarea') ? 'consult'
-    : document.activeElement === $('#claim-form input') ? 'claim' : '';
+  const focusedField = document.activeElement === $('#consult-form textarea') ? 'consult' : '';
   const status = data.status;
   const v = data.viewer;
   const leftCol = seatListHtml(data);
@@ -287,9 +335,8 @@ function renderRoomView(data, hasNewEvents = false, previousRoom = null) {
     $('#invite-text').value = inviteText;
   }
   if ($('#consult-form textarea')) $('#consult-form textarea').value = consultText;
-  if ($('#claim-form input')) $('#claim-form input').value = claimText;
   bindRoomEvents(data);
-  if (focusedField) $(focusedField === 'consult' ? '#consult-form textarea' : '#claim-form input')?.focus({ preventScroll: true });
+  if (focusedField) $('#consult-form textarea')?.focus({ preventScroll: true });
 }
 
 function statusLabel(s) {
@@ -307,7 +354,7 @@ function seatListHtml(data) {
     return `<li class="${cls.join(' ')}">
       <span class="seat-dot"></span>
       <span class="seat-name">${escapeHtml(name)}</span>
-      <span class="seat-sub">${escapeHtml(sub)}${s.claimed ? ' 🔓' : ''}</span>
+      <span class="seat-sub">${escapeHtml(sub)}</span>
       <span class="seat-role ${s.is_mine ? 'mine' : ''}">${escapeHtml(roleLabel(s.role))}</span>
     </li>`;
   }).join('');
@@ -322,17 +369,6 @@ function rightPanelHtml(data) {
   const v = data.viewer;
   const p = data.private_agent;
   let html = '';
-  if (v.can_claim) {
-    html += `<div class="paper panel key-card">
-      <h3>🔑 自分のAIの視点をひらく</h3>
-      <p class="field-hint">ゲーム開始後、あなたのAIが個別に伝えたキーフレーズを入力してください。</p>
-      <form id="claim-form">
-        <label class="field"><input type="password" name="phrase" autocomplete="off" placeholder="キーフレーズ" aria-label="キーフレーズ" required></label>
-        <div id="claim-error" class="field-error" hidden></div>
-        <button class="btn btn--primary" type="submit" style="width:100%">視点をひらく</button>
-      </form>
-    </div>`;
-  }
   if (p) {
     const k = p.knowledge || {};
     let know = `<span class="owner-eyebrow">YOUR AGENT</span><span class="own-role">${escapeHtml(roleLabel(p.role))}</span><p class="field-hint">${p.alive ? 'あなたのAIは生存しています' : 'あなたのAIは死亡しました。神視点で観戦できます。'}</p>`;
@@ -429,17 +465,6 @@ function seatNameOf(idx) {
 function initialOf(name) { return (name || '?').slice(0, 2); }
 
 function bindRoomEvents(data) {
-  const f1 = $('#claim-form');
-  if (f1) f1.onsubmit = async (e) => {
-    e.preventDefault();
-    const err = $('#claim-error'); err.hidden = true;
-    try {
-      await api(`/api/v1/rooms/${data.room_id}/claim`, { method: 'POST', body: JSON.stringify({ phrase: f1.phrase.value }) });
-      toast('自分のAIの視点になりました');
-      f1.phrase.value = '';
-      renderRoom(data.room_id);
-    } catch (ex) { err.textContent = ex.message; err.hidden = false; }
-  };
   const bs = $('#btn-start');
   if (bs) bs.onclick = async () => {
     bs.disabled = true; bs.textContent = '開始中…';
@@ -583,7 +608,7 @@ function renderMatch(data, hasNewEvents = false, previousRoom = null) {
     destroyMatch();
     app.innerHTML = `<div class="match-page"><div class="match-heading"><h1>${escapeHtml(data.name)}</h1><button class="btn btn--small" data-action="menu">ルーム ⋯</button></div>
       <div class="match-grid"><section class="match-main" aria-label="試合のテーブル"><div id="game-stage"></div><div id="current-speech"></div><div id="match-result"></div></section><aside class="owner-dock"><div id="owner-panel"></div></aside></div>
-      <nav class="match-actions" aria-label="観戦メニュー"><button class="btn btn--primary" data-action="history">▤ 履歴をひらく</button><button class="btn owner-open" data-action="owner">自分のAI</button></nav></div>`;
+      <nav class="match-actions" aria-label="観戦メニュー"><button class="btn btn--primary" data-action="history">▤ 履歴をひらく</button>${data.viewer.own_seat ? '<button class="btn owner-open" data-action="owner">自分のAI</button>' : ''}</nav></div>`;
     const sheet = document.createElement('dialog');
     sheet.className = 'game-sheet';
     sheet.setAttribute('aria-labelledby', 'game-sheet-title');
@@ -648,12 +673,10 @@ function updateOwnerPanel(data) {
   if (key !== ui.ownerKey) {
     const panel = $('#owner-panel');
     const text = panel.querySelector('textarea')?.value || '';
-    const phrase = panel.querySelector('[name="phrase"]')?.value || '';
     const focused = panel.contains(document.activeElement) ? document.activeElement.name : '';
     const selection = focused ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
     panel.innerHTML = rightPanelHtml(data);
     if (panel.querySelector('textarea')) panel.querySelector('textarea').value = text;
-    if (panel.querySelector('[name="phrase"]')) panel.querySelector('[name="phrase"]').value = phrase;
     bindRoomEvents(data);
     if (focused) {
       const field = [...panel.querySelectorAll('input, textarea')].find(el => el.name === focused);

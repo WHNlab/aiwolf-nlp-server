@@ -63,10 +63,10 @@ type Seat struct {
 	Original  string
 	GameName  string // ゲーム開始後に割り当てられた表示名
 	Token     string // AI接続用の秘密トークン
-	KeyPhrase string // 開始時にAIへ渡し、所有者の視点解放に使うフレーズ
+	KeyPhrase string // 旧クライアントとの互換用。Webでは席に紐づくセッションで視点を決める
 	Inbox     *model.OwnerInbox
 	Connected bool
-	Claimed   bool // 所有者がキーフレーズを検証済みか
+	Claimed   bool // 旧キーフレーズAPIとの互換用
 	AgentIdx  int  // ゲーム開始後のidx。未割当は0
 	Alive     bool
 	Role      string // ゲーム開始後の役職（投影用）
@@ -120,6 +120,7 @@ type Room struct {
 	Name             string
 	Config           model.Config
 	AgentCnt         int
+	Public           bool
 	Status           Status
 	AbortMsg         string
 	WinSide          string
@@ -135,6 +136,9 @@ type Room struct {
 	gameID           string
 	startedAt        time.Time
 	createdAt        time.Time
+	finishedAt       time.Time
+	archived         bool
+	archivedRoles    map[string]int
 	subs             map[int]*subscriber
 	nextSub          int
 	settings         *model.Setting
@@ -203,7 +207,7 @@ func (r *Room) viewModeOf(sess *Session) ViewMode {
 		return ViewPublic
 	}
 	seat := r.seatByUser(sess.UserID)
-	if seat == nil || !seat.Claimed {
+	if seat == nil || r.Status == StatusWaiting || r.Status == StatusStarting {
 		return ViewPublic
 	}
 	if r.Status == StatusRunning && !seat.Alive {
@@ -233,7 +237,7 @@ func (r *Room) canSee(e *Event, sess *Session) bool {
 			return false
 		}
 		seat := r.seatByUser(sess.UserID)
-		if seat == nil || !seat.Claimed || (r.Status == StatusRunning && !seat.Alive) {
+		if seat == nil || (r.Status == StatusRunning && !seat.Alive) {
 			return false
 		}
 		return contains(e.OnlyIdx, seat.AgentIdx)
@@ -243,7 +247,7 @@ func (r *Room) canSee(e *Event, sess *Session) bool {
 			return false
 		}
 		seat := r.seatByUser(sess.UserID)
-		if seat == nil || !seat.Claimed || seat.Role != e.RoleOnly || (r.Status == StatusRunning && !seat.Alive) {
+		if seat == nil || seat.Role != e.RoleOnly || (r.Status == StatusRunning && !seat.Alive) {
 			return false
 		}
 		return true
@@ -275,8 +279,7 @@ func (r *Room) Project(sess *Session) map[string]any {
 	if sess != nil {
 		if seat := r.seatByUser(sess.UserID); seat != nil {
 			mySeatID = seat.ID
-			claimable = r.Status == StatusRunning && !seat.Claimed && seat.KeyPhrase != ""
-			canConsult = r.Status == StatusRunning && seat.Claimed && seat.Alive
+			canConsult = r.Status == StatusRunning && seat.Alive
 		}
 	}
 	seats := make([]map[string]any, 0, len(r.Seats))
@@ -285,7 +288,7 @@ func (r *Room) Project(sess *Session) map[string]any {
 			"seat_id":   s.ID,
 			"user_name": s.UserName,
 			"connected": s.Connected,
-			"claimed":   s.Claimed,
+			"claimed":   s.Claimed || (r.Status == StatusRunning && s.UserID != ""),
 			"alive":     s.Alive,
 			"agent_idx": s.AgentIdx,
 			"is_mine":   sess != nil && s.UserID == sess.UserID,
@@ -294,7 +297,7 @@ func (r *Room) Project(sess *Session) map[string]any {
 			entry["team_name"] = s.Team
 			entry["game_name"] = s.GameName
 		}
-		if mode == ViewOmniscient || (sess != nil && s.UserID == sess.UserID && s.Claimed && s.Role != "") {
+		if mode == ViewOmniscient || (sess != nil && s.UserID == sess.UserID && r.Status == StatusRunning && s.Role != "") {
 			entry["role"] = s.Role
 		} else {
 			entry["role"] = "非公開"
@@ -305,12 +308,14 @@ func (r *Room) Project(sess *Session) map[string]any {
 		"room_id":      r.ID,
 		"name":         r.Name,
 		"status":       string(r.Status),
+		"is_public":    r.Public,
 		"agent_count":  r.AgentCnt,
 		"connected":    r.connectedCount(),
 		"day":          r.day,
 		"win_side":     r.WinSide,
 		"abort_reason": r.AbortMsg,
 		"created_at":   r.createdAt,
+		"finished_at":  r.finishedAt,
 		"roles":        r.roleMap(),
 		"seats":        seats,
 		"server_time":  time.Now(),
@@ -345,6 +350,12 @@ func (r *Room) viewerMap(sess *Session, isHost bool, mode ViewMode, claimable, c
 
 func (r *Room) roleMap() map[string]int {
 	out := make(map[string]int)
+	if r.archivedRoles != nil {
+		for k, v := range r.archivedRoles {
+			out[k] = v
+		}
+		return out
+	}
 	if roles, ok := r.Config.Logic.Roles[r.AgentCnt]; ok {
 		for k, v := range roles {
 			out[k] = v
@@ -369,7 +380,7 @@ func (r *Room) PrivateView(sess *Session) map[string]any {
 		return nil
 	}
 	seat := r.seatByUser(sess.UserID)
-	if seat == nil || !seat.Claimed || r.Status == StatusWaiting || r.Status == StatusStarting {
+	if seat == nil || r.Status == StatusWaiting || r.Status == StatusStarting {
 		return nil
 	}
 	out := map[string]any{
@@ -445,7 +456,7 @@ func (r *Room) InviteFor(sess *Session, wsBase string) map[string]any {
 	config, _ := json.MarshalIndent(map[string]any{"ws_url": url, "room_id": r.ID, "mode": mode}, "", "  ")
 	guide := "人狼参加キットを展開し、SKILL.mdの手順で参加してください。追加のLLM APIキーは不要です。\n" +
 		"以下をinvite.jsonとして保存してください（この席の所有者とAIだけで扱う秘密情報です）。\n" + string(config) + "\n\n" +
-		"CLIで接続し、ホストの開始を待ってください。開始後にinfo.key_phraseを私へ個別に伝えてください。\n" +
+		"CLIで接続し、ホストの開始を待ってください。\n" +
 		"待機中は同じ--sessionでnext --wait 15を実行します。通知がなければ最大15秒でwaiting・空のeventsが返ります。その場合だけ5秒sleepして再実行し、最大3回（合計60秒）で打ち切って私に知らせてください。接続プロセスは切らず、LLMの操作を止めます。\n" +
 		"私が再開を指示したら、同じ--sessionでresumeを1回実行して未読通知とpendingを確認してください。connectを再実行しないでください。action_requiredならpending.remaining_seconds以内にactし、expiredなら再送しないでください。\n" +
 		"CLIのローカル制御から25秒応答がなければエラーとして止まり、私に知らせてください。\n" +

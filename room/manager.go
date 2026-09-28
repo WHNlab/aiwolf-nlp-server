@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,7 @@ type Manager struct {
 	newObserve func() observer.GameObserver
 	mu         sync.Mutex
 	rooms      map[string]*Room
+	archiveDir string
 	sessions   map[string]*Session
 	seatTokens sync.Map // トークン→*Seat。r.muの内側でも書き込めるようsync.Mapにする。
 	seatConns  sync.Map // *Seat → *model.Connection（ゲーム開始時に束ねる）
@@ -76,6 +78,7 @@ type CreateParams struct {
 	UserName   string
 	AgentCount int
 	Mode       string // "participate" or "spectate"
+	Public     bool
 }
 
 // CreateRoom は部屋を作り、作成者をホストとして登録する。
@@ -111,6 +114,7 @@ func (m *Manager) CreateRoom(sess *Session, p CreateParams) (*Room, error) {
 		Name:      p.RoomName,
 		Config:    cfg,
 		AgentCnt:  p.AgentCount,
+		Public:    p.Public,
 		Status:    StatusWaiting,
 		phase:     model.PublicPhaseWaiting,
 		HostID:    sess.UserID,
@@ -142,7 +146,7 @@ func (m *Manager) addSeatLocked(r *Room, member *Member) *Seat {
 		UserID:    member.UserID,
 		UserName:  member.Name,
 		Token:     genToken(24),
-		KeyPhrase: genToken(6), // 短めのフレーズ。AIが所有者へ伝え、Webで入力する。
+		KeyPhrase: genToken(6), // 旧クライアント用の値を維持する。
 		Inbox:     model.NewOwnerInbox(),
 		Alive:     true,
 	}
@@ -168,9 +172,48 @@ func (m *Manager) addPlaceholderSeatsLocked(r *Room) {
 }
 
 func (m *Manager) GetRoom(id string) *Room {
+	m.pruneExpired()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.rooms[id]
+}
+
+// ListRooms は公開ルームのみを状態・名前・IDで探す。
+func (m *Manager) ListRooms(status, query string) []map[string]any {
+	m.pruneExpired()
+	query = strings.ToLower(strings.TrimSpace(query))
+	m.mu.Lock()
+	rooms := make([]*Room, 0, len(m.rooms))
+	for _, r := range m.rooms {
+		rooms = append(rooms, r)
+	}
+	m.mu.Unlock()
+	out := make([]map[string]any, 0)
+	for _, r := range rooms {
+		r.mu.Lock()
+		active := r.Status == StatusWaiting || r.Status == StatusStarting || r.Status == StatusRunning
+		finished := r.Status == StatusFinished || r.Status == StatusAborted
+		if r.Public && ((status == "active" && active) || (status == "finished" && finished)) &&
+			(query == "" || strings.Contains(strings.ToLower(r.Name), query) || strings.Contains(strings.ToLower(r.ID), query)) {
+			out = append(out, map[string]any{
+				"room_id": r.ID, "name": r.Name, "status": r.Status,
+				"agent_count": r.AgentCnt, "connected": r.connectedCount(),
+				"day": r.day, "created_at": r.createdAt, "finished_at": r.finishedAt,
+			})
+		}
+		r.mu.Unlock()
+	}
+	sort.Slice(out, func(i, j int) bool {
+		key := "created_at"
+		if status == "finished" {
+			key = "finished_at"
+		}
+		return out[i][key].(time.Time).After(out[j][key].(time.Time))
+	})
+	if len(out) > 50 {
+		out = out[:50]
+	}
+	return out
 }
 
 // Join はユーザーを部屋へ入室させる。mode=participate なら空席を1つ確保する。
@@ -188,23 +231,29 @@ func (m *Manager) Join(r *Room, sess *Session, name, mode string) (*Member, erro
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.archived || r.Status == StatusClosed || r.Status == StatusFinished || r.Status == StatusAborted {
+		return nil, ErrAlreadyStarted
+	}
 	if member, ok := r.Members[sess.UserID]; ok {
 		member.Name = name
 		return member, nil
 	}
-	member := &Member{UserID: sess.UserID, Name: name, IsHost: false, Joined: time.Now()}
-	r.Members[sess.UserID] = member
+	var available *Seat
 	if mode == "participate" {
 		if r.Status != StatusWaiting {
 			return nil, ErrAlreadyStarted
 		}
-		seat := r.freeSeatLocked()
-		if seat == nil {
+		available = r.freeSeatLocked()
+		if available == nil {
 			return nil, ErrRoomFull
 		}
-		seat.UserID = sess.UserID
-		seat.UserName = name
-		member.SeatID = seat.ID
+	}
+	member := &Member{UserID: sess.UserID, Name: name, IsHost: false, Joined: time.Now()}
+	r.Members[sess.UserID] = member
+	if available != nil {
+		available.UserID = sess.UserID
+		available.UserName = name
+		member.SeatID = available.ID
 	}
 	m.broadcastLocked(r)
 	return member, nil
@@ -354,7 +403,11 @@ func (m *Manager) startGame(r *Room) {
 			r.Status = StatusFinished
 			r.WinSide = string(win)
 		}
+		r.finishedAt = time.Now()
 		r.mu.Unlock()
+		if err := m.saveReplay(r); err != nil {
+			slog.Error("対戦記録を保存できませんでした", "room", r.ID, "error", err)
+		}
 		m.broadcast(r)
 		m.closeSubscribers(r)
 		slog.Info("ルームのゲームが終了しました", "room", r.ID, "win", win)
@@ -456,7 +509,7 @@ func (m *Manager) SendAdvice(r *Room, sess *Session, text string) error {
 	}
 	r.mu.Lock()
 	seat := r.seatByUser(sess.UserID)
-	if seat == nil || !seat.Claimed || r.Status != StatusRunning || !seat.Alive {
+	if seat == nil || r.Status != StatusRunning || !seat.Alive {
 		r.mu.Unlock()
 		return ErrNotAllowed
 	}

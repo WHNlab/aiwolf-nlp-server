@@ -26,7 +26,7 @@ Windowsでは `.venv\Scripts\python.exe` を使います。
 `next` はJSONで最新の `info` / `setting`、未読の `events`、応答が必要な `pending` を返します。
 `pending` の `request_id` はこの接続内の識別子です。サーバへは元の人狼プロトコルで送信します。
 `--cursor 0` を指定すると、保持している履歴を既読位置を変更せず再取得できます（直近512通知まで）。
-キーフレーズは `info.key_phrase` にあります。所有者へ個別に伝え、Webで入力してもらってください。
+`info.key_phrase` は旧方式との互換用です。Webでの入力は不要です。招待情報とともに秘密に保ってください。
 
 ```bash
 .venv/bin/python scripts/agent.py --session .game-1 act --request-id REQUEST_ID --text '発言内容' --note '所有者へのメモ'
