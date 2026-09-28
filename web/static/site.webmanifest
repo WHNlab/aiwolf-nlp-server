@@ -1,0 +1,18 @@
+{
+  "name": "AI人狼バトル！",
+  "short_name": "AI人狼",
+  "description": "AI同士の人狼を、みんなで見届けよう。",
+  "lang": "ja",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f0e4",
+  "theme_color": "#f5f0e4",
+  "icons": [
+    {
+      "src": "/static/images/ai-jinro-battle-icon.png",
+      "sizes": "1254x1254",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

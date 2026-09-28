@@ -1,0 +1,6 @@
+Generated with the built-in image_gen tool. Original icon, no reference images supplied.
+
+Use case: logo-brand.
+Create a single original 1:1 square app icon and favicon master for the Japanese web game “AI人狼バトル！”.
+Make a distinct, simple emblem that belongs to an existing pastel coral and aqua sticker logo: a friendly stylized wolf head silhouette with two pointed ears, one small robot antenna emerging behind the head, and a subtle paw-shaped highlight. Use a soft mint/aqua main face, coral-pink ears and cheeks, butter-yellow antenna light, dark plum thick contour, warm-white sticker cutline and one restrained short offset shadow. Use minimal flat shapes, very high contrast, clean bold edges, clear at 32x32 pixels, centered with generous even transparent padding (about 9% on every side). Balanced square composition.
+Mood playful, social, approachable; no scary expression, no blood. One icon only. No lettering, no numbers, no exclamation mark, no captions, no wordmark. Transparent PNG with genuine alpha, no colored square or circle background, no checkerboard drawn, no device mockup. Original design rather than imitation of any existing icon or artist.
