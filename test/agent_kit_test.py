@@ -91,6 +91,11 @@ class CLIProcessTests(unittest.TestCase):
                 self.assertEqual(cli("connect", "--invite-file", str(invite), "--name", "AI1")["status"], "waiting")
                 self.assertEqual(received, ["AI1"])
                 self.assertEqual(cli("status")["status"], "waiting")
+                self.assertEqual(cli("resume")["status"], "waiting")
+                self.assertEqual(cli("resume")["events"], [])
+                idle = cli("next", "--wait", "0.05")
+                self.assertEqual((idle["status"], idle["events"]), ("waiting", []))
+                self.assertEqual(cli("resume")["events"], [])
                 cli("connect", "--invite-file", str(invite), "--name", "AI1", ok=False)
                 proceed.set()
                 end = time.monotonic() + 10
@@ -99,6 +104,7 @@ class CLIProcessTests(unittest.TestCase):
                     if out["status"] == "action_required": break
                 self.assertEqual(out["info"]["key_phrase"], "private-test")
                 rid = out["pending"]["request_id"]
+                self.assertEqual(cli("resume")["pending"]["request_id"], rid)
                 self.assertEqual(cli("act", "--request-id", rid, "--text", "こんにちは", "--note", "確認中")["status"], "sent")
                 self.assertTrue(finished.wait(5))
                 self.assertEqual(received[-1], {"response": "こんにちは", "note": "確認中"})
@@ -109,6 +115,7 @@ class CLIProcessTests(unittest.TestCase):
                 while (session / "control.json").exists() and time.monotonic() < end: time.sleep(.05)
                 self.assertFalse((session / "control.json").exists())
                 self.assertEqual(cli("status")["status"], "finished")
+                self.assertEqual(cli("resume")["status"], "finished")
                 self.assertNotIn("secret", json.dumps(out))
             finally:
                 if (session / "control.json").exists(): cli("disconnect")

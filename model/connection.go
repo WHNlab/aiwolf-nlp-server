@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/gorilla/websocket"
 )
@@ -55,6 +56,14 @@ type Connection struct {
 	Conn         *websocket.Conn
 	Header       *http.Header
 	Seat         *SeatContext
+	messages     chan AgentMessage
+	done         chan struct{}
+	ready        *atomic.Bool
+}
+
+// Done は待機中も含め、WebSocket の読み取りが終了したことを通知する。
+func (c *Connection) Done() <-chan struct{} {
+	return c.done
 }
 
 func NewConnection(conn *websocket.Conn, header *http.Header) (*Connection, error) {
@@ -83,7 +92,30 @@ func NewConnection(conn *websocket.Conn, header *http.Header) (*Connection, erro
 		OriginalName: originalName,
 		Conn:         conn,
 		Header:       header,
+		messages:     make(chan AgentMessage, 100),
+		done:         make(chan struct{}),
+		ready:        &atomic.Bool{},
 	}
+	// 開始待ちにも Ping を読み、Pong を返す。ゲーム開始後も同じ読み手を使う。
+	go connection.readMessages()
 	slog.Info("クライアントが接続しました", "team_name", connection.TeamName, "original_name", connection.OriginalName, "remote_addr", conn.RemoteAddr().String())
 	return &connection, nil
+}
+
+func (c *Connection) readMessages() {
+	defer close(c.done)
+	for {
+		_, data, err := c.Conn.ReadMessage()
+		if err != nil {
+			select {
+			case c.messages <- AgentMessage{Err: err}:
+			default:
+			}
+			return
+		}
+		// ゲーム開始前の本文は応答として扱わない。制御フレームは ReadMessage が処理する。
+		if c.ready.Load() {
+			c.messages <- AgentMessage{Data: data}
+		}
+	}
 }

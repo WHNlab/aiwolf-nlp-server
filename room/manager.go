@@ -244,15 +244,36 @@ func (m *Manager) AgentJoin(roomID, token string, conn *model.Connection) error 
 	}
 	if seat.Connected {
 		slog.Warn("席への再接続を受け付けました", "room", roomID, "seat", seat.ID)
+		if old, ok := m.seatConns.Load(seat); ok {
+			old.(*model.Connection).Conn.Close()
+		}
 	}
 	seat.Connected = true
 	seat.Team = conn.TeamName
 	seat.Original = conn.OriginalName
 	conn.Seat = &model.SeatContext{RoomID: roomID, SeatID: seat.ID, KeyPhrase: seat.KeyPhrase, Inbox: seat.Inbox}
 	m.seatConns.Store(seat, conn)
+	go m.watchSeat(r, seat, conn)
 	m.broadcastLocked(r)
 	slog.Info("AIが席に接続しました", "room", roomID, "seat", seat.ID, "team", conn.TeamName)
 	return nil
+}
+
+func (m *Manager) watchSeat(r *Room, seat *Seat, conn *model.Connection) {
+	<-conn.Done()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// 新しい接続に交代済み、またはゲーム開始済みなら席の状態を上書きしない。
+	current, ok := m.seatConns.Load(seat)
+	if r.Status != StatusWaiting || !ok || current != conn {
+		return
+	}
+	m.seatConns.Delete(seat)
+	seat.Connected = false
+	seat.Team = ""
+	seat.Original = ""
+	m.broadcastLocked(r)
+	slog.Info("待機中のAIが切断しました", "room", r.ID, "seat", seat.ID)
 }
 
 func containsSeat(seats []*Seat, target *Seat) bool {
@@ -380,8 +401,16 @@ func (m *Manager) Leave(r *Room, sess *Session) error {
 	if member.IsHost {
 		// ホスト退出は部屋を閉じる扱いにする。
 		r.Status = StatusClosed
+		for _, seat := range r.Seats {
+			if old, ok := m.seatConns.LoadAndDelete(seat); ok {
+				old.(*model.Connection).Conn.Close()
+			}
+		}
 		m.closeSubscribersLocked(r)
 	} else if seat := r.seatByUser(sess.UserID); seat != nil {
+		if old, ok := m.seatConns.LoadAndDelete(seat); ok {
+			old.(*model.Connection).Conn.Close()
+		}
 		seat.UserID = ""
 		seat.UserName = ""
 		seat.Connected = false
@@ -405,6 +434,11 @@ func (m *Manager) Close(r *Room, sess *Session) error {
 		return ErrAlreadyStarted
 	}
 	r.Status = StatusClosed
+	for _, seat := range r.Seats {
+		if old, ok := m.seatConns.LoadAndDelete(seat); ok {
+			old.(*model.Connection).Conn.Close()
+		}
+	}
 	m.broadcastLocked(r)
 	m.closeSubscribersLocked(r)
 	return nil

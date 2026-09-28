@@ -48,6 +48,10 @@ func TestInvitePublicURLAndKit(t *testing.T) {
 			if invite["mode"] != "turn" || out.Header().Get("Cache-Control") != "no-store" || !strings.Contains(out.Header().Get("Content-Disposition"), "invite.json") {
 				t.Fatal("招待設定の属性が不正です")
 			}
+			guide, _ := invite["guide_text"].(string)
+			if !strings.Contains(guide, "next --wait 15") || !strings.Contains(guide, "5秒sleep") || !strings.Contains(guide, "resume") {
+				t.Fatal("招待案内に待機上限と再開手順がありません")
+			}
 			out = httptest.NewRecorder()
 			router.ServeHTTP(out, httptest.NewRequest("GET", "/api/v1/rooms/"+r.ID+"/invite", nil))
 			if out.Code != 403 {

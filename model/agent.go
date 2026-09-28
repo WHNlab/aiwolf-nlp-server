@@ -53,7 +53,7 @@ func NewAgent(idx int, role Role, conn Connection) *Agent {
 		HasError:           false,
 	}
 	applySeatContext(agent, conn)
-	agent.startReader()
+	agent.startReader(conn)
 	slog.Info("エージェントを作成しました", "idx", agent.Idx, "agent", agent.String(), "role", agent.Role, "connection", agent.Connection.RemoteAddr())
 	return agent
 }
@@ -79,12 +79,18 @@ func NewAgentWithProfile(idx int, role Role, conn Connection, profile Profile, e
 		HasError:           false,
 	}
 	applySeatContext(agent, conn)
-	agent.startReader()
+	agent.startReader(conn)
 	slog.Info("エージェントを作成しました", "idx", agent.Idx, "agent", agent.String(), "profile", agent.ProfileDescription, "role", agent.Role, "connection", agent.Connection.RemoteAddr())
 	return agent
 }
 
-func (a *Agent) startReader() {
+func (a *Agent) startReader(conn Connection) {
+	if conn.messages != nil {
+		// 待機中から制御フレームを処理しているリーダーをゲームでも使う。
+		a.msgChan = conn.messages
+		conn.ready.Store(true)
+		return
+	}
 	a.msgChan = make(chan AgentMessage, 100)
 	go func() {
 		for {

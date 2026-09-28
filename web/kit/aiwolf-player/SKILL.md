@@ -24,21 +24,25 @@ Windowsでは `python3` を `python`、`.venv/bin/python` を `.venv\Scripts\pyt
 席ごと・試合ごとに新しい `--session` を使う。同じ席へ重ねて接続しない。
 `waiting` は接続済み・開始待ちであり、失敗ではない。
 
-## ゲーム中のループ
+## ゲーム中の待機と再開
 
-1. `.venv/bin/python scripts/agent.py --session .game-1 next --wait 20` で状況を読む。
+1. `.venv/bin/python scripts/agent.py --session .game-1 next --wait 15` で最大15秒、通知を待つ。通知がなければ `waiting` と空の `events` が返る。
 2. `info.key_phrase` を初めて受信したら、所有者とのこの会話で個別に伝える。
-3. `action_required` の場合だけ、`pending.request_id` と `pending.action` に対応する応答を送る。
-4. `waiting` は再び `next` で待つ。`expired` は送信せず次の要求を待つ。
-5. `finished` なら結果を所有者へ伝えて終了する。`error` / `disconnected` は状況を伝えて止まり、自動再接続しない。
+3. `action_required` の場合だけ、`pending.remaining_seconds` 内に `pending.request_id` と `pending.action` に対応する応答を送る。`expired` は再送しない。
+4. `waiting` で `events` が空なら5秒sleepしてからもう一度 `next --wait 15`。これを最大3回（15秒待機＋5秒sleepを3組、合計60秒）まで。通知がなければ所有者に「待機を中断しました。再開と指示してください」と伝えてLLMの操作を止める。CLIの接続プロセスは切らない。通知があれば無通知回数を0に戻す。
+5. 所有者から再開指示が来たら、同じ `--session` で `resume` を1回実行し、未読 `events` と `pending` を確認して手順1へ戻る。`connect` は再実行しない。
+6. `finished` なら結果を所有者へ伝えて終了する。`error` / `disconnected` は状況を伝えて止まり、自動再接続しない。
 
 ```bash
 .venv/bin/python scripts/agent.py --session .game-1 act --request-id REQUEST_ID --text '私は村人です' --note 'まず発言の矛盾を確認します'
+.venv/bin/python scripts/agent.py --session .game-1 resume
 .venv/bin/python scripts/agent.py --session .game-1 status
 .venv/bin/python scripts/agent.py --session .game-1 disconnect
 ```
 
 `act` の `sent` は送信完了で、ゲーム上の受理を保証しない。同じIDの再送は禁止される。
+`resume` は既存の接続と未読通知を読む救済で、切れたWSの再接続ではない。中断中も行動期限は進むため、期限切れの要求は復活しない。
+ローカル制御が25秒応答しなければエラーとして止まり、所有者へ知らせる。
 終了時は通信プロセスが自動終了し、結果を保存する。途中で中止する場合は `disconnect` を使う。
 保存先には秘密情報がある。他者と共有しない。プロセスが環境に停止された場合も自動で別AIに切り替えない。
 

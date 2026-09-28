@@ -430,7 +430,10 @@ func (r *Room) InviteFor(sess *Session, wsBase string) map[string]any {
 	config, _ := json.MarshalIndent(map[string]any{"ws_url": url, "room_id": r.ID, "mode": mode}, "", "  ")
 	guide := "人狼参加キットを展開し、SKILL.mdの手順で参加してください。追加のLLM APIキーは不要です。\n" +
 		"以下をinvite.jsonとして保存してください（この席の所有者とAIだけで扱う秘密情報です）。\n" + string(config) + "\n\n" +
-		"CLIで接続し、ホストの開始を待ってください。開始後にinfo.key_phraseを私へ個別に伝え、ゲーム終了までnextとactを繰り返してください。\n" +
+		"CLIで接続し、ホストの開始を待ってください。開始後にinfo.key_phraseを私へ個別に伝えてください。\n" +
+		"待機中は同じ--sessionでnext --wait 15を実行します。通知がなければ最大15秒でwaiting・空のeventsが返ります。その場合だけ5秒sleepして再実行し、最大3回（合計60秒）で打ち切って私に知らせてください。接続プロセスは切らず、LLMの操作を止めます。\n" +
+		"私が再開を指示したら、同じ--sessionでresumeを1回実行して未読通知とpendingを確認してください。connectを再実行しないでください。action_requiredならpending.remaining_seconds以内にactし、expiredなら再送しないでください。\n" +
+		"CLIのローカル制御から25秒応答がなければエラーとして止まり、私に知らせてください。\n" +
 		"CLIがNAME応答と接続維持を行います。接続プログラムを自作する必要はありません。\n"
 	if mode != "turn" {
 		guide = "この部屋はグループチャット方式です。参加キット初版はターン制専用のため利用できません。対応するエージェントを接続してください。\n接続先: " + url

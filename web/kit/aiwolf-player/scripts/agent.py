@@ -17,9 +17,11 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 ACTIONS = {"TALK", "WHISPER", "VOTE", "DIVINE", "GUARD", "ATTACK"}
 TERMINAL = {"finished", "disconnected", "error"}
+DEFAULT_WAIT_SECONDS = 15
+CONTROL_TIMEOUT_SECONDS = 25
 
 
 def save(path, value):
@@ -245,13 +247,17 @@ def control(session, command, body):
     # ローカル制御はHTTP_PROXY等へ流さない。
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
-        with opener.open(req, timeout=25) as res:
+        with opener.open(req, timeout=CONTROL_TIMEOUT_SECONDS) as res:
             return json.load(res)
     except urllib.error.HTTPError as exc:
         raise ValueError(json.load(exc).get("error", "CLI操作に失敗しました")) from None
-    except urllib.error.URLError:
+    except TimeoutError:
+        raise ValueError("ローカル制御から25秒応答がありません。接続プロセスの状態を確認してください") from None
+    except urllib.error.URLError as exc:
         if final.exists():
             return control(session, command, body)
+        if isinstance(exc.reason, TimeoutError):
+            raise ValueError("ローカル制御から25秒応答がありません。接続プロセスの状態を確認してください") from None
         raise ValueError("接続プロセスに到達できません。statusを確認してください") from None
 
 
@@ -264,8 +270,9 @@ def main():
     p.add_argument("--invite-file", type=Path, required=True)
     p.add_argument("--name", required=True)
     p = sub.add_parser("next")
-    p.add_argument("--wait", type=float, default=20)
+    p.add_argument("--wait", type=float, default=DEFAULT_WAIT_SECONDS)
     p.add_argument("--cursor", type=int, help="省略時は前回取得位置から差分を返す")
+    sub.add_parser("resume", help="待機を中断した後に同じセッションの未読通知と応答要求を取得")
     p = sub.add_parser("act")
     p.add_argument("--request-id", required=True)
     p.add_argument("--text", required=True)
@@ -310,14 +317,14 @@ def main():
                 raise ValueError("接続確認がタイムアウトしました")
         else:
             body = {}
-            if args.command == "next":
+            if args.command in ("next", "resume"):
                 cursor_file = session / "cursor.json"
-                cursor = args.cursor if args.cursor is not None else (read(cursor_file) if cursor_file.exists() else 0)
-                body = {"cursor": cursor, "wait": args.wait}
+                cursor = args.cursor if args.command == "next" and args.cursor is not None else (read(cursor_file) if cursor_file.exists() else 0)
+                body = {"cursor": cursor, "wait": args.wait if args.command == "next" else 0}
             elif args.command == "act":
                 body = {"request_id": args.request_id, "text": args.text, "note": args.note}
-            out = control(session, args.command, body)
-            if args.command == "next" and args.cursor is None:
+            out = control(session, "next" if args.command == "resume" else args.command, body)
+            if args.command == "resume" or (args.command == "next" and args.cursor is None):
                 save(session / "cursor.json", out["cursor"])
         print(json.dumps(out, ensure_ascii=False))
         if out.get("status") == "error":

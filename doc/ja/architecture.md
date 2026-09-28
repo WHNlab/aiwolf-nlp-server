@@ -56,6 +56,7 @@ flowchart LR
 - `server.web` (既定 8080): 人間向けの Web UI と `/api/v1/rooms` 系のルーム API。こちらには `/ws` や `/api/v1/games` は公開しません。
 
 ルームのゲームは `matchmaking.GameManager` とは別経路で `room.Manager` が生成します。\
+`NAME` 応答後も同じ接続リーダーが待機中の Ping/Pong を処理し、ゲーム開始時には受信チャネルを `Agent` に渡します。待機中に切断した席は未接続へ戻します。\
 ゲームイベントは専用の recorder（`room/gameRecorder`、observer実装）を介してルームの履歴に記録され、閲覧者の視点（公開・自分のAI・神視点）でフィルタして SSE で配信します。
 
 ## 起動から対戦までの流れ

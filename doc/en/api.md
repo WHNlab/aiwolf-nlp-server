@@ -181,4 +181,4 @@ The event types are as follows. Note that the `event` values are Japanese string
 
 `GET /api/v1/rooms/{id}/invite` returns `ws_url`, `mode` (`turn` / `freeform`), `kit_version`, `kit_path`, and `guide_text` only to the seat owner. Use `?download=1` to save it as `invite.json`. Responses use `Cache-Control: no-store`.
 The public URL prefers `server.web_socket.public_url`; it is not inferred from the web domain or TLS termination.
-`GET /downloads/aiwolf-player-0.1.0.zip` serves the CLI and SKILL without credentials or authentication. `GET /agent/SKILL.md` and `GET /agent/GUIDE.md` serve the instructions. See the [player kit guide](/doc/en/agent-kit.md).
+`GET /downloads/aiwolf-player-0.2.0.zip` serves the CLI and SKILL without credentials or authentication. `GET /downloads/aiwolf-player.zip` serves the current version. `GET /agent/SKILL.md` and `GET /agent/GUIDE.md` serve the instructions. See the [player kit guide](/doc/en/agent-kit.md).

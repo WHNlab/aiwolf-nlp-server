@@ -56,6 +56,7 @@ When `server.web.enable` is `true`, a single process starts two listeners.
 - `server.web` (default 8080): The Web UI and the `/api/v1/rooms` room APIs for humans. `/ws` and `/api/v1/games` are not published here.
 
 Room games are created by `room.Manager` through a separate path from `matchmaking.GameManager`.\
+After the `NAME` response, the same connection reader handles Ping/Pong while waiting and passes its message channel to `Agent` when a game starts. A seat disconnected before the start returns to the unconnected state.\
 Game events are recorded into the room history via a dedicated recorder (`room/gameRecorder`, an observer implementation), filtered by each viewer's perspective (public / own agent / omniscient), and delivered over SSE.
 
 ## From Startup to a Game

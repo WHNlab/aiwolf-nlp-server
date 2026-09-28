@@ -83,6 +83,7 @@ func TestRoomGameEndToEnd(t *testing.T) {
 	}
 
 	keyPhrases := make(chan string, 5)
+	pongs := make(chan string, 1)
 	var wsConns []*websocket.Conn
 	for i := 0; i < 5; i++ {
 		inv := get(clients[i], "/api/v1/rooms/"+roomID+"/invite")
@@ -93,6 +94,12 @@ func TestRoomGameEndToEnd(t *testing.T) {
 		conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 		if err != nil {
 			t.Fatalf("AI接続失敗: %v", err)
+		}
+		if i == 0 {
+			conn.SetPongHandler(func(data string) error {
+				pongs <- data
+				return nil
+			})
 		}
 		wsConns = append(wsConns, conn)
 		idx := i
@@ -151,6 +158,18 @@ func TestRoomGameEndToEnd(t *testing.T) {
 	rm = get(clients[0], "/api/v1/rooms/"+roomID)
 	if c, _ := rm["connected"].(float64); int(c) != 5 {
 		t.Fatalf("AI接続が揃いません: %v", rm["connected"])
+	}
+	// 開始待ちでもサーバが Ping を読み Pong を返せることを確かめる。
+	if err := wsConns[0].WriteControl(websocket.PingMessage, []byte("waiting"), time.Now().Add(2*time.Second)); err != nil {
+		t.Fatalf("待機中のPing送信失敗: %v", err)
+	}
+	select {
+	case data := <-pongs:
+		if data != "waiting" {
+			t.Fatalf("待機中のPongが不正です: %q", data)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("待機中のPongが返りませんでした")
 	}
 
 	res := post(clients[0], "/api/v1/rooms/"+roomID+"/start", `{}`)
@@ -227,4 +246,77 @@ func TestRoomGameEndToEnd(t *testing.T) {
 	for _, c := range wsConns {
 		c.Close()
 	}
+}
+
+func TestRoomWaitingDisconnect(t *testing.T) {
+	config, err := model.LoadFromPath("./config/room.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.Server.WebSocket.Port = getAvailableTcpPort(config.Server.WebSocket.Host)
+	config.Server.Web.Port = getAvailableTcpPort(config.Server.Web.Host)
+	go func() {
+		srv, err := transport.NewServer(*config)
+		if err == nil {
+			srv.Run()
+		}
+	}()
+	time.Sleep(time.Second)
+	base := "http://" + config.Server.Web.Host + ":" + strconv.Itoa(config.Server.Web.Port)
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{Jar: jar, Timeout: 5 * time.Second}
+	request := func(method, path, body string) map[string]any {
+		req, err := http.NewRequest(method, base+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusCreated {
+			t.Fatalf("%s %s: %d", method, path, res.StatusCode)
+		}
+		var out map[string]any
+		if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	created := request("POST", "/api/v1/rooms", `{"user_name":"ホスト","agent_count":5,"mode":"participate"}`)
+	path := "/api/v1/rooms/" + created["room_id"].(string)
+	invite := request("GET", path+"/invite", "")
+	conn, _, err := websocket.DefaultDialer.Dial(invite["ws_url"].(string), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := conn.ReadMessage(); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, []byte("test-agent")); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if request("GET", path, "")["connected"] == float64(1) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if request("GET", path, "")["connected"] != float64(1) {
+		t.Fatal("AIの接続が表示されません")
+	}
+	conn.Close()
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if request("GET", path, "")["connected"] == float64(0) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("切断したAIの席が接続済みのままです")
 }
