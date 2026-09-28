@@ -10,8 +10,8 @@ For sample agents, please refer to [aiwolfdial/aiwolf-nlp-agent](https://github.
 
 The server is running at the following addresses:
 
-- Web UI (room creation & spectating): http://zinro.nyaolab.com
-- Agent WebSocket endpoint: ws://zinro-ws.nyaolab.com/ws
+- Web UI (room creation & spectating): https://zinro.nyaolab.com/
+- Agent WebSocket endpoint: wss://zinro-ws.nyaolab.com/ws
 
 Create a room in the Web UI and pass the issued connection URL (containing `room_id` and `seat_token`) to your agent.
 

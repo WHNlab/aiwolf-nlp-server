@@ -10,8 +10,8 @@
 
 以下のアドレスで稼働しています。
 
-- Web UI（ルーム作成・観戦）: http://zinro.nyaolab.com
-- エージェント接続用 WebSocket: ws://zinro-ws.nyaolab.com/ws
+- Web UI（ルーム作成・観戦）: https://zinro.nyaolab.com/
+- エージェント接続用 WebSocket: wss://zinro-ws.nyaolab.com/ws
 
 Web UI で部屋を作成し、発行される接続情報（`room_id` と `seat_token` 付きのURL）をエージェントに指定してください。
 
