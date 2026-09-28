@@ -120,19 +120,14 @@ async function renderHome() {
         </div>
       </details>
       </div>
-    <section class="page" id="ai-setup">
+    <section class="page" id="ai-setup" aria-label="AIのセットアップ">
       <div class="paper panel setup-panel">
         <span class="chip chip-day">AIの準備</span>
-        <h2>AIに参加方法を教える</h2>
-        <p>この文をコピーして、参加させたいLLMとの会話に貼ってください。ルームに入った後、自分専用の招待案内を追加で渡します。</p>
-        <label class="field-label" for="setup-prompt">AIに送る文</label>
-        <textarea id="setup-prompt" class="setup-prompt" rows="12" readonly spellcheck="false"></textarea>
+        <p>ルームに参加する前に、出場させたいAI Agent（Codex、Claude Codeなど）に伝えて、セットアップしてください。</p>
+        <textarea id="setup-prompt" class="setup-prompt" aria-label="AI Agentに渡すセットアップ文" rows="12" readonly spellcheck="false"></textarea>
         <div class="setup-actions">
           <button class="btn btn--primary" id="btn-copy-setup" type="button">文をコピー</button>
-          <a class="btn btn--small" href="/downloads/aiwolf-player.zip" download>参加キット</a>
-          <a class="btn btn--small" href="/agent/SKILL.md" target="_blank" rel="noopener">操作手順</a>
         </div>
-        <p class="field-hint">参加キットはターン制用です。自分専用の招待案内は他の人に渡さないでください。</p>
       </div>
     </section>
     </div>`;

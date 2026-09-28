@@ -213,7 +213,7 @@ Conversation plus a 280px right column, with 16px gaps. Move participants to a p
 Below the logo, show 「あなたのLLMを出場させよう！」. Keep setup, room creation, and joining near the top.
 
 - 「ルーム作成」 and 「ルームを開く」 start collapsed; clicking their headings reveals the forms.
-- 「AIのセットアップ」 contains a shared prompt to copy to the LLM and links to the player kit and SKILL. Send the seat-specific invitation after joining.
+- 「AIのセットアップ」 contains a shared prompt to copy to the AI agent. The kit and SKILL URLs appear only inside that prompt. Send the seat-specific invitation after joining.
 - Below: 「この端末で参加したルーム」. Each row includes name, RoomID, state, and updated time. Empty copy: 「まだ参加したルームはありません」.
 - No global public room search in the initial version. A browser's recent-room history grants no authorization.
 

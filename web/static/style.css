@@ -185,8 +185,7 @@ body::before {
 .home-disclosure summary:focus-visible { outline: 3px solid var(--focus); outline-offset: -5px; border-radius: var(--radius-panel); }
 .home-disclosure[open] summary { border-bottom: 1px solid var(--rule); }
 .home-disclosure-content { min-width: 0; padding: 20px; }
-.setup-panel h2 { margin-top: 12px; }
-.setup-panel p { margin: 0 0 16px; }
+.setup-panel p { margin: 12px 0 16px; }
 .setup-prompt {
   width: 100%; min-height: 250px; padding: 12px; resize: vertical;
   border: 2px solid var(--edge); border-radius: var(--radius-control);
@@ -196,7 +195,6 @@ body::before {
 .setup-prompt:focus { outline: 3px solid var(--focus); outline-offset: 2px; }
 .setup-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
 .setup-actions .btn { max-width: 100%; white-space: normal; text-align: center; }
-.setup-panel .field-hint { margin: 8px 0 0; }
 .room-grid { display: grid; grid-template-columns: 220px minmax(0, 1fr) 320px; gap: 24px; align-items: start; }
 .lobby-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; align-items: start; }
 .panel { min-width: 0; padding: 20px; }
