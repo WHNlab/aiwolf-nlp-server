@@ -63,6 +63,24 @@ func (c *Composite) OnPhase(id string, request model.Request) {
 	}
 }
 
+func (c *Composite) OnPublicPhase(id string, phase model.PublicPhase, day int) {
+	for _, o := range c.observers {
+		o.OnPublicPhase(id, phase, day)
+	}
+}
+
+func (c *Composite) OnPublicTurnStart(id string, turn model.PublicTurnView) {
+	for _, o := range c.observers {
+		o.OnPublicTurnStart(id, turn)
+	}
+}
+
+func (c *Composite) OnPublicTurnEnd(id string, turnID string) {
+	for _, o := range c.observers {
+		o.OnPublicTurnEnd(id, turnID)
+	}
+}
+
 func (c *Composite) OnRequest(id string, agent model.AgentView, request json.RawMessage) {
 	for _, o := range c.observers {
 		o.OnRequest(id, agent, request)

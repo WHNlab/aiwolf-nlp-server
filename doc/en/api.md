@@ -56,9 +56,15 @@ When `server.web.enable` is `true`, a separate HTTP server for the Web UI (`serv
 | `GET /api/v1/rooms/{id}/invite` | Returns the agent connection URL (`room_id` + `seat_token`) and guide text for your seat |
 | `GET /api/v1/rooms/{id}` | Current room state; roles are masked according to the viewer's perspective |
 | `GET /api/v1/rooms/{id}/history?cursor=N` | Event history filtered by viewing permission (seq > cursor) |
-| `GET /api/v1/rooms/{id}/events` | Event stream (SSE, event name `room`) |
+| `GET /api/v1/rooms/{id}/events` | Event stream (SSE, `room` update notices and `heartbeat` keepalives) |
+
+The `progress` field in `GET /api/v1/rooms/{id}` contains public game progress. `phase` is one of `waiting`, `day_discussion`, `day_vote`, `night`, or `finished`; `revision` increments whenever progress changes. `active_public_turn` is set only while a sequential daytime public TALK response is pending and is `null` otherwise. Its value contains `turn_id`, `agent_idx`, `state: "waiting"`, and `deadline_at: null`. The server has no authoritative deadline to project. Freeform chat and night actors or secret subphases are not exposed as a single pending turn.
+
+SSE sends a `room` notice when progress changes, even if the history `seq` does not. When the visibility of existing history changes, such as votes revealed on the following day, refetch `GET /history` without a cursor after a day, status, or viewpoint update. A cursor only returns events with a newer seq.
 
 The viewpoint (`viewer.view_mode`) is one of `public` / `agent` / `omniscient`.+After the game ends or is aborted, and for viewers whose own agent has died, the viewpoint becomes `omniscient` and all information including roles and attack votes is visible.
+
+When execution or attack confirms a death, the seat status, owner perspective, and advice permission update with that event. A successfully guarded agent remains alive.
 
 ## Endpoint Details
 

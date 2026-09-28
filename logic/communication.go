@@ -13,6 +13,9 @@ func (g *Game) doWhisper() {
 
 func (g *Game) doTalk() {
 	slog.Info("トークフェーズを開始します", "id", g.id, "day", g.currentDay)
+	if g.isDaytime {
+		g.obs.OnPublicPhase(g.id, model.PublicPhaseDayDiscussion, g.currentDay)
+	}
 	g.conductCommunication(model.R_TALK)
 }
 

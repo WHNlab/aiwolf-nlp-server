@@ -1,0 +1,435 @@
+/* AI人狼バトル！ — テーブル観戦ステージ (tabletop.js と対)
+   既存の紙・方眼・立体ボタンと同じLightの色を、tt- 名前空間で独立させる。
+   非表示タブでは body.tt-paused で装飾アニメを一時停止する。 */
+
+.tt-stage {
+  --tt-plum: #45335a;
+  --tt-paper: var(--paper, #fffdf6);
+  --tt-mint: var(--mint, #9be0be);
+  --tt-mint-d: #6fc39c;
+  --tt-wood: #e9c69c;
+  --tt-yellow: var(--yellow, #ffdfa0);
+  --tt-coral: #f6a79a;
+  --tt-lav: #ddd6f7;
+  --tt-ink: var(--ink, #2c3340);
+  --tt-focus: var(--focus, #235d96);
+  --rbw: 76px;
+  --tt-tw: 60%;
+  --tt-th: 56%;
+  position: relative;
+  background: var(--tt-paper);
+  border: 2.5px solid var(--tt-plum);
+  border-radius: 20px;
+  box-shadow: 0 4px 0 rgb(69 51 90 / 18%), 0 10px 24px rgb(30 30 30 / 8%);
+  padding: 12px 10px 14px;
+  color: var(--tt-ink);
+  font: inherit;
+}
+
+/* ---------- 進行バー ---------- */
+.tt-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.tt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 12px;
+  min-height: 30px;
+  border: 2px solid var(--tt-plum);
+  border-radius: 999px;
+  background: #fffdf8;
+  font-size: 0.8rem;
+  font-weight: 800;
+  line-height: 1.4;
+  white-space: nowrap;
+  box-shadow: 0 3px 0 rgb(69 51 90 / 18%);
+}
+.tt-chip .tt-ic { width: 15px; height: 15px; flex: none; }
+.tt-chip-day { background: var(--tt-yellow); }
+.tt-chip-phase.is-day { background: var(--tt-yellow); }
+.tt-chip-phase.is-night { background: var(--tt-lav); }
+.tt-chip-phase.is-end { background: var(--tt-mint); }
+.tt-chip-alive { background: var(--tt-mint); color: #1f4d38; }
+.tt-chip-wait { background: #ffdcd4; color: #7c3427; }
+.tt-chip-off {
+  background: var(--paper-inset, #f0ebdd);
+  border-style: dashed;
+  color: var(--ink-muted, #626b77);
+  font-weight: 700;
+}
+
+/* ---------- テーブル ---------- */
+.tt-arena {
+  position: relative;
+  height: clamp(430px, 44vw, 540px);
+  margin-top: 24px;
+}
+.tt-stage[data-size="s"] .tt-arena { height: clamp(450px, 46vw, 560px); }
+
+.tt-table {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--tt-tw);
+  height: var(--tt-th);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+/* 楕円の側面(厚み)。天板より少し下にずらして2.5Dに見せる */
+.tt-table::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateY(12px);
+  border-radius: 50%;
+  background: var(--tt-wood);
+  border: 3px solid var(--tt-plum);
+  box-shadow: 0 16px 20px -8px rgb(69 51 90 / 30%);
+}
+.tt-table-top {
+  position: absolute;
+  inset: 0;
+  display: block;
+  border-radius: 50%;
+  border: 3px solid var(--tt-plum);
+  background: radial-gradient(ellipse at 50% 36%, #c4f1dc 0%, var(--tt-mint) 62%, var(--tt-mint-d) 100%);
+}
+.tt-table-top::before {
+  content: "";
+  position: absolute;
+  inset: 9%;
+  border: 2px dashed rgb(69 51 90 / 26%);
+  border-radius: 50%;
+}
+.tt-table-motif {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--tt-plum);
+  opacity: 0.38;
+}
+.tt-paw { width: 16%; height: auto; }
+
+/* 卓上の小物。狭い画面・多人数では先に隠す */
+.tt-prop { position: absolute; pointer-events: none; }
+.tt-prop-plant { left: 5%; top: 6%; width: 44px; }
+.tt-prop-mug { right: 6%; top: 10%; width: 40px; }
+.tt-prop-svg { display: block; width: 100%; height: auto; }
+.tt-stage[data-size="s"] .tt-prop { display: none; }
+
+/* ---------- 席 ---------- */
+.tt-seats {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tt-seat {
+  position: absolute;
+  left: var(--tx);
+  top: var(--ty);
+  transform: translate(-50%, -50%);
+  z-index: 2;
+}
+.tt-seat-btn {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 56px;
+  min-height: 44px;
+  margin: 0;
+  padding: 2px 4px;
+  border: none;
+  border-radius: 16px;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.tt-seat-btn:focus-visible {
+  outline: 3px solid var(--tt-focus);
+  outline-offset: 3px;
+}
+
+/* ---------- ロボット ---------- */
+.tt-robot {
+  position: relative;
+  display: block;
+  width: var(--rbw);
+  transition: transform 120ms ease, filter 200ms ease;
+}
+.tt-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.tt-flip .tt-svg { transform: scaleX(-1); }
+.tt-svg .f-body { fill: var(--rb, #9be0be); }
+.tt-svg .f-shade { fill: var(--rbd, #55a37c); }
+.tt-svg .f-pale { fill: var(--rbp, #e9faf0); }
+.tt-svg .f-dark { fill: #37304c; }
+.tt-svg .f-eye { fill: #eafff4; }
+.tt-svg .f-acc { fill: #ffd76e; }
+.tt-svg .f-shadow { fill: rgb(69 51 90 / 14%); }
+.tt-svg .ln {
+  stroke: var(--tt-plum);
+  stroke-width: 3.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.tt-svg .nofill { fill: none; }
+.tt-svg .ln-thin {
+  fill: none;
+  stroke: #37304c;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.tt-svg .ln-eye {
+  fill: none;
+  stroke: #eafff4;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+}
+@media (hover: hover) {
+  .tt-seat-btn:hover .tt-robot { transform: translateY(-2px); }
+}
+
+/* 死亡: コマだけ彩度を落とし、名前のコントラストは落とさない */
+.tt-seat.is-dead .tt-svg { filter: saturate(0.35); opacity: 0.55; }
+.tt-ribbon {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--rbw) * 0.52);
+  transform: translate(-50%, -50%) rotate(-8deg);
+  padding: 1px 12px;
+  border: 2px solid #2c2138;
+  border-radius: 5px;
+  background: var(--tt-plum);
+  color: #fdfbf5;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  box-shadow: 0 2px 0 rgb(30 20 40 / 35%);
+  z-index: 3;
+}
+
+/* 応答待ちの輪郭リング(色+文字ラベルで非色情報も担保) */
+.tt-ring {
+  position: absolute;
+  inset: -8px -9px;
+  border: 3px solid var(--tt-coral);
+  border-radius: 24px;
+  opacity: 0.85;
+  pointer-events: none;
+}
+.tt-seat.is-pending .tt-ring { animation: tt-pulse 1.6s ease-in-out infinite; }
+.tt-stage.is-off .tt-ring,
+.tt-stage.is-off .tt-chip-wait { animation: none; opacity: 0.7; }
+
+/* 状態フラグ。発言(吹き出し)と応答待ち(思考中)は別の席に同時に付きうる */
+.tt-flag {
+  position: absolute;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 8px;
+  border: 2px solid var(--tt-plum);
+  border-radius: 999px;
+  font-size: 0.64rem;
+  font-weight: 800;
+  line-height: 1.5;
+  white-space: nowrap;
+  box-shadow: 0 2px 0 rgb(69 51 90 / 25%);
+  z-index: 4;
+}
+.tt-flag .tt-ic { width: 12px; height: 12px; flex: none; }
+.tt-flag-talk {
+  top: -10px;
+  transform: translateX(-50%) rotate(-2deg);
+  background: var(--tt-yellow);
+}
+.tt-flag-wait {
+  top: -32px;
+  transform: translateX(-50%) rotate(1.5deg);
+  background: #ffdcd4;
+  color: #7c3427;
+}
+.tt-flag-wait + .tt-flag-talk { top: -10px; }
+
+/* ---------- 名札 ---------- */
+.tt-plate {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 9px;
+  border: 2px solid var(--tt-plum);
+  border-radius: 10px;
+  background: #fffdf8;
+  box-shadow: 0 3px 0 rgb(69 51 90 / 22%);
+}
+.tt-num {
+  font-weight: 800;
+  font-size: 0.74rem;
+  color: var(--tt-plum);
+  letter-spacing: 0.03em;
+}
+.tt-name {
+  font-weight: 700;
+  font-size: 0.78rem;
+  max-width: 7em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tt-extra {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+}
+.tt-mine, .tt-role {
+  padding: 0 7px;
+  border: 1.5px solid var(--tt-plum);
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 1.7;
+  white-space: nowrap;
+}
+.tt-mine { background: var(--tt-mint); color: #1f4d38; }
+.tt-role { background: var(--purple, #e6dcfa); border-radius: 8px; }
+
+.tt-empty {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ink-muted, #626b77);
+}
+
+/* ---------- 演出(options.animate=true の描画でのみ付く) ---------- */
+@keyframes tt-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.55; }
+  50% { transform: scale(1.06); opacity: 1; }
+}
+@keyframes tt-pop {
+  0% { transform: translateY(0); }
+  35% { transform: translateY(-5px); }
+  70% { transform: translateY(1px); }
+  100% { transform: translateY(0); }
+}
+@keyframes tt-land {
+  from { transform: translateY(-14px) scale(0.7); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
+}
+@keyframes tt-death {
+  from { transform: translateY(-4px); filter: none; opacity: 1; }
+  to { transform: translateY(3px); }
+}
+.tt-seat.tt-fx-pop .tt-robot { animation: tt-pop 0.28s ease-out 1; }
+.tt-seat.tt-fx-land .tt-seat-btn { animation: tt-land 0.5s cubic-bezier(0.2, 1.4, 0.4, 1) both; animation-delay: var(--d, 0ms); }
+.tt-seat.tt-fx-death .tt-svg { animation: tt-death 0.45s ease-out both; }
+.tt-stage.is-off .tt-seat.tt-fx-pop .tt-robot,
+.tt-stage.is-off .tt-seat.tt-fx-land .tt-seat-btn { animation: none; }
+
+/* ---------- 人数別サイズ ---------- */
+.tt-stage[data-size="l"] { --rbw: 78px; --tt-tw: 60%; --tt-th: 57%; }
+.tt-stage[data-size="m"] { --rbw: 64px; --tt-tw: 66%; --tt-th: 56%; }
+.tt-stage[data-size="s"] { --rbw: 54px; --tt-tw: 72%; --tt-th: 54%; }
+
+/* ---------- モバイル: 手前1+左右に並ぶ縦長テーブル ---------- */
+@media (max-width: 900px) {
+  .tt-stage { padding: 10px 6px 14px; }
+  .tt-arena { margin-top: 26px; height: 340px; }
+  .tt-stage[data-size="m"] .tt-arena { height: 470px; }
+  .tt-stage[data-size="s"] .tt-arena { height: clamp(560px, 158vw, 620px); }
+  .tt-prop { display: none; }
+  .tt-seat { left: var(--mx); top: var(--my); }
+  .tt-stage[data-size="l"] { --rbw: 60px; --tt-tw: 62%; --tt-th: 52%; }
+  .tt-stage[data-size="m"] { --rbw: 50px; --tt-tw: 68%; --tt-th: 56%; }
+  .tt-stage[data-size="s"] { --rbw: 42px; --tt-tw: 72%; --tt-th: 56%; }
+  .tt-stage[data-size="s"] .tt-seat-btn { min-width: 48px; }
+  .tt-stage[data-size="s"] .tt-plate { padding: 1px 6px; gap: 4px; }
+  .tt-stage[data-size="s"] .tt-name { max-width: 4.6em; font-size: 0.68rem; }
+  .tt-stage[data-size="s"] .tt-num { font-size: 0.68rem; }
+  .tt-stage[data-size="s"] .tt-mine, .tt-stage[data-size="s"] .tt-role { font-size: 0.56rem; padding: 0 5px; }
+  .tt-flag { font-size: 0.6rem; padding: 1px 6px; }
+  .tt-chip { min-height: 28px; padding: 2px 10px; font-size: 0.76rem; }
+}
+
+/* ---------- 動きの軽減・非表示タブ ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .tt-stage *, .tt-stage *::before, .tt-stage *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  .tt-seat.is-pending .tt-ring { opacity: 0.9; border-style: dashed; }
+}
+body.tt-paused .tt-stage * { animation-play-state: paused !important; }
+
+/* 多人数でも席の当たり判定を重ねず、文字拡大では行の高さを増やす。 */
+@media (min-width: 901px) {
+  .tt-arena { height: max(400px, 25rem); }
+  .tt-stage[data-size="m"] .tt-arena { height: max(480px, 30rem); }
+  .tt-stage[data-size="s"] .tt-arena { height: max(560px, 35rem); }
+  .tt-stage:is([data-size="m"], [data-size="s"]) .tt-seat-btn { display: grid; grid-template-columns: 44px minmax(0, 1fr); width: 140px; column-gap: 4px; }
+  .tt-stage:is([data-size="m"], [data-size="s"]) .tt-robot { width: 44px; grid-column: 1; grid-row: 1 / span 3; }
+  .tt-stage:is([data-size="m"], [data-size="s"]) .tt-plate { grid-column: 2; padding: 2px 5px; gap: 3px; }
+  .tt-stage:is([data-size="m"], [data-size="s"]) .tt-name { font-size: .72rem; }
+  .tt-stage:is([data-size="m"], [data-size="s"]) .tt-extra { grid-column: 2; flex-wrap: wrap; }
+  .tt-stage:is([data-size="m"], [data-size="s"]) .tt-flag { position: static; transform: none; grid-column: 2; font-size: .6rem; justify-self: center; }
+  .tt-stage:is([data-size="m"], [data-size="s"]) .tt-ribbon { left: 27px; top: 30px; }
+}
+@media (max-width: 900px) {
+  .tt-stage .tt-arena, .tt-stage[data-size="m"] .tt-arena, .tt-stage[data-size="s"] .tt-arena { height: auto; margin-top: 20px; }
+  .tt-seats { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 18px minmax(0, 1fr); grid-auto-rows: minmax(52px, auto); gap: 8px 0; }
+  .tt-seat { position: relative; left: auto; top: auto; transform: none; grid-column: var(--m-col); grid-row: var(--m-row); min-width: 0; display: flex; align-items: center; }
+  .tt-seat-btn { width: 100%; min-width: 0 !important; display: grid; grid-template-columns: minmax(0, 1fr) var(--rbw); gap: 2px 4px; padding: 5px 0; }
+  .tt-robot { grid-column: 2; grid-row: 1 / span 4; }
+  .tt-plate { grid-column: 1; grid-row: 1; padding: 2px 4px; gap: 3px; min-width: 0; }
+  .tt-name { font-size: .7rem; min-width: 0; }
+  .tt-num { font-size: .7rem; }
+  .tt-extra { grid-column: 1; flex-wrap: wrap; justify-content: center; }
+  .tt-flag { position: static; transform: none; grid-column: 1; justify-self: center; font-size: .6rem; padding: 1px 4px; }
+  .tt-ribbon { left: auto; right: calc(var(--rbw) / 2); top: 50%; transform: translate(50%, -50%) rotate(-8deg); font-size: .6rem; padding: 1px 5px; }
+  .tt-seat[data-side="right"] .tt-seat-btn { grid-template-columns: var(--rbw) minmax(0, 1fr); }
+  .tt-seat[data-side="right"] .tt-robot { grid-column: 1; }
+  .tt-seat[data-side="right"] .tt-plate, .tt-seat[data-side="right"] .tt-extra, .tt-seat[data-side="right"] .tt-flag { grid-column: 2; }
+  .tt-seat[data-side="right"] .tt-ribbon { left: calc(var(--rbw) / 2); right: auto; transform: translate(-50%, -50%) rotate(-8deg); }
+  .tt-seat[data-side="bottom"] { grid-column: 1 / -1; justify-content: center; padding-top: 8px; }
+  .tt-seat[data-side="bottom"] .tt-seat-btn { display: flex; flex-direction: column; width: auto; max-width: 90%; }
+  .tt-seat[data-side="bottom"] .tt-plate { max-width: 170px; }
+  .tt-seat[data-side="bottom"] .tt-ribbon { left: 50%; right: auto; top: 24px; transform: translateX(-50%) rotate(-8deg); }
+  .tt-table { width: 56%; height: calc(100% - 100px); top: 0; transform: translate(-50%, 0); }
+  .tt-stage[data-size="l"] .tt-seats { row-gap: 12px; grid-auto-rows: minmax(92px, auto); }
+  .tt-stage[data-size="l"] .tt-table { width: 62%; }
+  .tt-chip { white-space: normal; max-width: 100%; overflow-wrap: anywhere; }
+  .tt-mine, .tt-role { white-space: normal; }
+  .tt-ring { inset: -4px; }
+}
+.tt-seat.tt-fx-land .tt-seat-btn { animation-duration: .4s; }
+@media (max-width: 900px) {
+  .tt-stage[data-size="s"] { --rbw: 36px; }
+  .tt-stage[data-size="s"] .tt-seats { row-gap: 4px; }
+  .tt-stage[data-size="s"] .tt-seat-btn { padding: 2px 0; min-height: 48px; }
+  .tt-stage[data-size="s"] .tt-mine, .tt-stage[data-size="s"] .tt-role { font-size: .65rem; }
+  .tt-stage[data-size="s"] .tt-name, .tt-stage[data-size="s"] .tt-num { font-size: .72rem; }
+  .tt-stage[data-size="s"] .tt-seat[data-side="bottom"] .tt-plate { min-width: 150px; }
+}
+
+.tt-plate, .tt-name { min-width: 0; }
+@media (min-width: 901px) { .tt-seat-btn { width: 150px; } }
+.tt-stage[data-phase="night"] { background: #f6f2fc; }
+.tt-phase-change .tt-chip-phase { animation: tt-phase .35s ease-out; }
+@keyframes tt-phase { from { opacity: .5; } to { opacity: 1; } }

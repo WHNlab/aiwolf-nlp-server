@@ -28,7 +28,59 @@ func (g *gameRecorder) OnGameStart(id string, agents []model.AgentView, state mo
 }
 
 func (g *gameRecorder) OnGameEnd(id string, winSide model.Team, state model.GameState) {
+	g.room.mu.Lock()
+	if g.room.phase != model.PublicPhaseFinished || g.room.activePublicTurn != nil || g.room.day != state.Day {
+		g.room.phase = model.PublicPhaseFinished
+		g.room.day = state.Day
+		g.room.activePublicTurn = nil
+		g.room.progressRevision++
+		g.manager.broadcastLocked(g.room)
+	}
+	g.room.mu.Unlock()
 	g.append(&Event{Type: "game_end", Day: state.Day, Text: "ゲームが終了しました", Team: string(winSide)})
+}
+
+func (g *gameRecorder) OnPublicPhase(id string, phase model.PublicPhase, day int) {
+	switch phase {
+	case model.PublicPhaseDayDiscussion, model.PublicPhaseDayVote, model.PublicPhaseNight, model.PublicPhaseFinished:
+	default:
+		return
+	}
+	g.room.mu.Lock()
+	defer g.room.mu.Unlock()
+	changed := g.room.phase != phase || g.room.day != day || g.room.activePublicTurn != nil
+	if !changed {
+		return
+	}
+	g.room.phase = phase
+	g.room.day = day
+	g.room.activePublicTurn = nil
+	g.room.progressRevision++
+	g.manager.broadcastLocked(g.room)
+}
+
+func (g *gameRecorder) OnPublicTurnStart(id string, turn model.PublicTurnView) {
+	g.room.mu.Lock()
+	defer g.room.mu.Unlock()
+	if g.room.phase != model.PublicPhaseDayDiscussion || turn.TurnID == "" || turn.AgentIdx <= 0 {
+		return
+	}
+	g.room.activePublicTurn = &publicTurnProgress{
+		TurnID: turn.TurnID, AgentIdx: turn.AgentIdx, State: "waiting",
+	}
+	g.room.progressRevision++
+	g.manager.broadcastLocked(g.room)
+}
+
+func (g *gameRecorder) OnPublicTurnEnd(id string, turnID string) {
+	g.room.mu.Lock()
+	defer g.room.mu.Unlock()
+	if g.room.activePublicTurn == nil || g.room.activePublicTurn.TurnID != turnID {
+		return
+	}
+	g.room.activePublicTurn = nil
+	g.room.progressRevision++
+	g.manager.broadcastLocked(g.room)
 }
 
 // OnDayStatus は日付境界と生死の確定を記録する。
@@ -36,7 +88,11 @@ func (g *gameRecorder) OnGameEnd(id string, winSide model.Team, state model.Game
 func (g *gameRecorder) OnDayStatus(id string, day int, statuses []model.AgentStatus) {
 	g.room.mu.Lock()
 	defer g.room.mu.Unlock()
+	progressChanged := g.room.day != day
 	g.room.day = day
+	if progressChanged {
+		g.room.progressRevision++
+	}
 	changed := false
 	for _, st := range statuses {
 		seat := g.room.seatByIdx(st.Idx)
@@ -51,7 +107,7 @@ func (g *gameRecorder) OnDayStatus(id string, day int, statuses []model.AgentSta
 	}
 	g.room.appendEvent(&Event{Type: "day", Day: day})
 	g.manager.broadcastEventLocked(g.room, g.room.Events[len(g.room.Events)-1])
-	if changed {
+	if changed || progressChanged {
 		g.manager.broadcastLocked(g.room)
 	}
 }
@@ -96,6 +152,7 @@ func (g *gameRecorder) OnAttackVote(id string, day int, agent model.AgentView, t
 func (g *gameRecorder) OnExecute(id string, day int, executed *model.AgentView, state model.GameState) {
 	e := &Event{Type: "execute", Day: day}
 	if executed != nil {
+		g.markDead(executed.Idx)
 		e.ToIdx = intPtr(executed.Idx)
 		e.Text = "追放されました"
 		g.append(e)
@@ -118,6 +175,9 @@ func (g *gameRecorder) OnGuard(id string, day int, agent model.AgentView, target
 func (g *gameRecorder) OnAttack(id string, day int, attacked *model.AgentView, guarded bool, state model.GameState) {
 	e := &Event{Type: "attack", Day: day, Guarded: &guarded}
 	if attacked != nil {
+		if !guarded {
+			g.markDead(attacked.Idx)
+		}
 		e.ToIdx = intPtr(attacked.Idx)
 		e.Text = "襲撃されました"
 	} else {
@@ -127,6 +187,15 @@ func (g *gameRecorder) OnAttack(id string, day int, attacked *model.AgentView, g
 		e.Text = "襲撃は防がれました"
 	}
 	g.append(e)
+}
+
+// 公開された死亡と視点を同時に更新し、次の朝まで助言できる状態を残さない。
+func (g *gameRecorder) markDead(idx int) {
+	g.room.mu.Lock()
+	defer g.room.mu.Unlock()
+	if seat := g.room.seatByIdx(idx); seat != nil {
+		seat.Alive = false
+	}
 }
 
 func (g *gameRecorder) OnOwnerMessage(id string, day int, agent model.AgentView, message string) {

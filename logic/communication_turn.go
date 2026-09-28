@@ -19,6 +19,12 @@ func (s *CommunicationSession) runTurnBased() {
 			if !s.canAgentTalk(agent) {
 				continue
 			}
+			var turnID string
+			// 同じ TALK 要求でも夜間に設定されたものは公開の応答待ちにしない。
+			if s.request == model.R_TALK && s.game.isDaytime {
+				turnID = s.game.nextPublicTurnID()
+				s.game.obs.OnPublicTurnStart(s.game.id, model.PublicTurnView{TurnID: turnID, AgentIdx: agent.Idx})
+			}
 			text := s.game.getTalkWhisperText(agent, s.request)
 
 			talk := s.buildTalk(agent, text, i, time.Now())
@@ -27,6 +33,9 @@ func (s *CommunicationSession) runTurnBased() {
 				cnt = true
 			}
 			s.logTalk(talk)
+			if turnID != "" {
+				s.game.obs.OnPublicTurnEnd(s.game.id, turnID)
+			}
 			slog.Info("発言を受信しました", "id", s.game.id, "agent", agent.String(), "text", talk.Text, "count", s.remainCountMap[*agent], "length", s.remainLengthMap[*agent], "skip", s.remainSkipMap[*agent])
 		}
 		if !cnt {

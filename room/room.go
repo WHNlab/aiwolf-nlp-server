@@ -104,31 +104,41 @@ type subscriber struct {
 	session *Session
 }
 
+type publicTurnProgress struct {
+	TurnID     string     `json:"turn_id"`
+	AgentIdx   int        `json:"agent_idx"`
+	State      string     `json:"state"`
+	DeadlineAt *time.Time `json:"deadline_at"`
+}
+
 // Room は1部屋1ゲームの状態を保持する。
 // ルームの状態は r.mu、購読者一覧とセッションは Manager.mu が守る。
 // ロック順は常に Manager.mu → Room.mu。
 type Room struct {
-	mu        sync.Mutex
-	ID        string
-	Name      string
-	Config    model.Config
-	AgentCnt  int
-	Status    Status
-	AbortMsg  string
-	WinSide   string
-	HostID    string
-	Members   map[string]*Member
-	Seats     []*Seat
-	Events    []*Event
-	seq       int
-	day       int
-	gameID    string
-	startedAt time.Time
-	createdAt time.Time
-	subs      map[int]*subscriber
-	nextSub   int
-	settings  *model.Setting
-	game      *logic.Game
+	mu               sync.Mutex
+	ID               string
+	Name             string
+	Config           model.Config
+	AgentCnt         int
+	Status           Status
+	AbortMsg         string
+	WinSide          string
+	HostID           string
+	Members          map[string]*Member
+	Seats            []*Seat
+	Events           []*Event
+	seq              int
+	day              int
+	phase            model.PublicPhase
+	progressRevision uint64
+	activePublicTurn *publicTurnProgress
+	gameID           string
+	startedAt        time.Time
+	createdAt        time.Time
+	subs             map[int]*subscriber
+	nextSub          int
+	settings         *model.Setting
+	game             *logic.Game
 }
 
 // Session はブラウザのCookieに対応する。UserIDはルーム横断で安定させる。
@@ -305,7 +315,12 @@ func (r *Room) Project(sess *Session) map[string]any {
 		"seats":        seats,
 		"server_time":  time.Now(),
 		"cursor":       r.seq,
-		"viewer":       r.viewerMap(sess, isHost, mode, claimable, canConsult, mySeatID),
+		"progress": map[string]any{
+			"phase":              string(r.phase),
+			"revision":           r.progressRevision,
+			"active_public_turn": r.activePublicTurn,
+		},
+		"viewer": r.viewerMap(sess, isHost, mode, claimable, canConsult, mySeatID),
 	}
 }
 

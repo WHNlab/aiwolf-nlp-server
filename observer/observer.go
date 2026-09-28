@@ -19,6 +19,9 @@ type GameObserver interface {
 	OnTalk(id string, day int, request model.Request, talk model.TalkView, voiceID *int, state model.GameState)
 	OnFreeformTalk(id string, agent model.AgentView, request model.Request, talk model.TalkView)
 	OnPhase(id string, request model.Request)
+	OnPublicPhase(id string, phase model.PublicPhase, day int)
+	OnPublicTurnStart(id string, turn model.PublicTurnView)
+	OnPublicTurnEnd(id string, turnID string)
 	OnRequest(id string, agent model.AgentView, request json.RawMessage)
 	OnResponse(id string, agent model.AgentView, response string, err error)
 

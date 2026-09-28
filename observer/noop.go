@@ -17,6 +17,9 @@ func (NoopObserver) OnResult(string, int, int, int, model.Team)                 
 func (NoopObserver) OnTalk(string, int, model.Request, model.TalkView, *int, model.GameState)    {}
 func (NoopObserver) OnFreeformTalk(string, model.AgentView, model.Request, model.TalkView)       {}
 func (NoopObserver) OnPhase(string, model.Request)                                               {}
+func (NoopObserver) OnPublicPhase(string, model.PublicPhase, int)                                {}
+func (NoopObserver) OnPublicTurnStart(string, model.PublicTurnView)                              {}
+func (NoopObserver) OnPublicTurnEnd(string, string)                                              {}
 func (NoopObserver) OnRequest(string, model.AgentView, json.RawMessage)                          {}
 func (NoopObserver) OnResponse(string, model.AgentView, string, error)                           {}
 func (NoopObserver) OnVote(string, int, model.AgentView, model.AgentView, model.GameState)       {}
