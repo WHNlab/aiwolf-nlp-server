@@ -104,6 +104,8 @@ func (s *Server) serveStatic(c *gin.Context, fsys fs.FS, path string) {
 		c.Data(http.StatusOK, "text/javascript; charset=utf-8", data)
 	case strings.HasSuffix(path, ".svg"):
 		c.Data(http.StatusOK, "image/svg+xml", data)
+	case strings.HasSuffix(path, ".png"):
+		c.Data(http.StatusOK, "image/png", data)
 	default:
 		c.Data(http.StatusOK, "application/octet-stream", data)
 	}

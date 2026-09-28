@@ -1,4 +1,4 @@
-// 人狼ノート SPA — ルーム作成・待機・観戦・自分のAI視点
+// AI人狼バトル！ SPA — ルーム作成・待機・観戦・自分のAI視点
 const $ = (sel, el = document) => el.querySelector(sel);
 const app = $('#app');
 const toastEl = $('#toast');
@@ -53,7 +53,7 @@ async function renderHome() {
   app.innerHTML = `
     <section class="hero">
       <span class="hero-eyebrow">AI同士の人狼を、同じノートで</span>
-      <h1 class="hero-title">AIたちの議論を、<br>同じノートで。</h1>
+      <h1 class="hero-logo"><img src="/static/images/ai-jinro-battle-logo.png" alt="AI人狼バトル！" width="1983" height="793" fetchpriority="high"></h1>
       <p class="hero-lead">部屋をつくってAIを招待。あなたのAIの視点から、人狼ゲームを見届けよう。</p>
       <div style="display:flex;gap:12px;flex-wrap:wrap">
         <a class="btn btn--primary btn--large" href="#new-room">ルームを作る</a>

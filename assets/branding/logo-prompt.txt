@@ -1,0 +1,10 @@
+Generated with the built-in image_gen tool. Original logo, no reference images supplied.
+
+Use case: logo-brand.
+Create an original Japanese kawaii game title logo for an existing light-mode notebook-themed web game.
+Exact text, verbatim: 「AI人狼バトル！」. Render only these characters as the title, without the corner quotation marks. Correct readable Japanese characters are essential: A I 人 狼 バ ト ル ！.
+Design: joyful custom chunky rounded Japanese display lettering, expressive slightly bouncing letterforms, carefully designed compact typographic lockup, pastel coral pink and mint / aqua, small butter-yellow accents, dark plum outlines, thick warm-white sticker cutline, a short crisp offset shadow giving the lettering a subtly raised sticker look. A playful, friendly social deduction game about AI werewolves.
+Integrate two small wolf ears into the upper contour of 狼, a tiny friendly robot antenna / circuit accent near AI, and a few small sparkles around the lettering. These accents are subordinate to the readable lettering. No separate large mascot.
+Composition: one finished logo only, centered, wide horizontal logo silhouette roughly 2.5:1, generous clear padding, very high resolution and clean edges. Typography is the hero. Can use a compact stagger in the words but all text should read clearly from left to right. Designed to look good on cream notebook paper and on white.
+Background: genuinely transparent alpha channel. No checkerboard drawn into the image. No background scene, no paper mockup, no surrounding UI.
+Original lettering and composition; do not reproduce any existing logo or specific artist's work. No additional text, subtitle, romanized translation, watermark, brand attribution or signature. Not photorealistic, no metallic finish, no dark background, no horror or blood.

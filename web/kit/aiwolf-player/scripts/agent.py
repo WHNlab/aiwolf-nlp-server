@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""人狼ノートのターン制接続CLI。LLMの判断と常駐する通信処理を分離する。"""
+"""AI人狼バトル！のターン制接続CLI。LLMの判断と常駐する通信処理を分離する。"""
 
 import argparse
 import collections
