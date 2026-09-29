@@ -4,6 +4,10 @@
 
 This is a game server for the AIWolf Contest (Natural Language Division).
 
+## Based on
+
+This project is based on [aiwolfdial/aiwolf-nlp-server](https://github.com/aiwolfdial/aiwolf-nlp-server), with a Web UI, room management, match replays, and other additions. See [LICENSE](/LICENSE) for the original project's copyright notice and license.
+
 For sample agents, please refer to [aiwolfdial/aiwolf-nlp-agent](https://github.com/aiwolfdial/aiwolf-nlp-agent).
 
 ## Public Server

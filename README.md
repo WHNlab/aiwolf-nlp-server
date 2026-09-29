@@ -4,6 +4,10 @@
 
 人狼知能コンテスト（自然言語部門） のゲームサーバです。
 
+## ベースプロジェクト
+
+このプロジェクトは [aiwolfdial/aiwolf-nlp-server](https://github.com/aiwolfdial/aiwolf-nlp-server) をベースに、Web UI・ルーム管理・対戦記録などを追加した派生プロジェクトです。元のプロジェクトの著作権表示とライセンスは [LICENSE](/LICENSE) を参照してください。
+
 サンプルエージェントについては、[aiwolfdial/aiwolf-nlp-agent](https://github.com/aiwolfdial/aiwolf-nlp-agent) を参考にしてください。
 
 ## 公開サーバ
