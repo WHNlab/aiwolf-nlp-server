@@ -14,6 +14,7 @@ let feed = null;
 let homeTimer = null;
 let homeSearchTimer = null;
 let routeRevision = 0;
+let rentalCaps = { available: false, max_skill_length: 200, supported_counts: [5], supported_modes: ['turn'], reason: '' };
 
 function toast(msg, ms = 2200) {
   toastEl.textContent = msg;
@@ -84,6 +85,7 @@ async function renderHome(revision) {
     const d = await api('/api/v1/room-presets');
     presets = d.presets || [];
   } catch (e) { presets = []; }
+  try { rentalCaps = await api('/api/v1/rental-capabilities'); } catch (_) { /* 既定値のまま */ }
   if (revision !== routeRevision) return;
   const cards = presets.map(p => `
     <label class="radio-card">
@@ -121,10 +123,26 @@ async function renderHome(revision) {
           </div>
           <div class="field"><span class="field-label">参加方法</span>
             <div class="radio-cards">
-              <label class="radio-card"><input type="radio" name="mode" value="participate" checked>
+              <label class="radio-card" id="rental-card-create"><input type="radio" name="mode" value="rental" ${rentalCaps.available ? 'checked' : 'disabled'}>
+                <span class="card-inner">レンタルAI<small>設定なしで今すぐ遊ぶ</small></span></label>
+              <label class="radio-card"><input type="radio" name="mode" value="participate" ${rentalCaps.available ? '' : 'checked'}>
                 <span class="card-inner">AIも参加<small>自分のAIを1席確保</small></span></label>
               <label class="radio-card"><input type="radio" name="mode" value="spectate">
                 <span class="card-inner">観戦のみ<small>友達のAIだけで対戦</small></span></label>
+            </div>
+          </div>
+          <div id="rental-fields" class="rental-fields" ${rentalCaps.available ? '' : 'hidden'}>
+            <label class="field"><span class="field-label">AIの名前</span>
+              <input type="text" name="rental_name" maxlength="24" placeholder="例: そらとぶピカチュウ">
+            </label>
+            <div class="field"><span class="field-label">カスタムSKILL <small class="field-hint-inline">性格・話し方・戦い方の希望（任意）</small></span>
+              <textarea name="rental_skill" rows="3" maxlength="200" placeholder="例: 穏やかな口調で、発言の矛盾と投票先を重視してください。怪しい人にもまず質問し、根拠を短く説明してください。"></textarea>
+              <div class="skill-footer"><span class="skill-examples">
+                <button type="button" class="btn btn--tiny skill-example" data-skill="慎重に推理する口調で、根拠を述べてから結論を出します。焦って吊り先を決めず、矛盾点を質問で確かめます。">慎重派</button>
+                <button type="button" class="btn btn--tiny skill-example" data-skill="積極的に意見を出す口調で、怪しい人にははっきり投票します。率先して議論を引っ張ります。">積極派</button>
+                <button type="button" class="btn btn--tiny skill-example" data-skill="聞き役に回る口調で、他者の発言を整理して質問します。目立たないが、投票は筋を通します。">聞き役</button>
+              </span><span class="skill-counter" id="skill-counter">0 / 200</span></div>
+              <p class="field-hint">SKILLは性格や戦略の希望で、ルールを変えるものではありません。他の参加者にも見える可能性があるため、秘密の情報は書かないでください。</p>
             </div>
           </div>
           <div class="field"><span class="field-label">公開設定</span>
@@ -154,6 +172,7 @@ async function renderHome(revision) {
     <section class="page" id="ai-setup" aria-label="AIのセットアップ">
       <div class="paper panel setup-panel">
         <span class="chip chip-day">AIの準備</span>
+        <p class="field-hint">設定なしですぐ遊びたい場合は、ルーム作成で「レンタルAI」を選んでください。以下は自分のAI Agentを接続する場合の手順です。</p>
         <p>ルームに参加する前に、出場させたいAI Agent（Codex、Claude Codeなど）に伝えて、セットアップしてください。</p>
         <textarea id="setup-prompt" class="setup-prompt" aria-label="AI Agentに渡すセットアップ文" rows="12" readonly spellcheck="false"></textarea>
         <div class="setup-actions">
@@ -186,21 +205,58 @@ async function renderHome(revision) {
   loadDirectory();
   homeTimer = setInterval(loadDirectory, 12000);
   $('#btn-copy-setup').onclick = () => copyTextarea($('#setup-prompt'), 'AIへの説明をコピーしました');
+  // レンタルAIの入力欄を選択時だけ開く。5人・ターン制以外では選べない。
+  const createForm = $('#create-form');
+  const skillLimit = rentalCaps.max_skill_length || 200;
+  const syncRentalFields = () => {
+    const cnt = Number(createForm.agent_count.value || 5);
+    const preset = presets.find(p => p.agent_count === cnt);
+    const supported = rentalCaps.available && (rentalCaps.supported_counts || []).includes(cnt) && (!preset || (rentalCaps.supported_modes || []).includes(preset.mode));
+    const radio = createForm.querySelector('input[name=mode][value=rental]');
+    if (radio) {
+      radio.disabled = !supported;
+      if (!supported && radio.checked) createForm.querySelector('input[name=mode][value=participate]').checked = true;
+    }
+    const show = radio && radio.checked;
+    $('#rental-fields').hidden = !show;
+    if (show) createForm.rental_name.required = false;
+  };
+  const syncSkillCounter = () => {
+    const n = [...createForm.rental_skill.value].length;
+    $('#skill-counter').textContent = n + ' / ' + skillLimit;
+  };
+  createForm.addEventListener('change', syncRentalFields);
+  createForm.rental_skill.addEventListener('input', syncSkillCounter);
+  createForm.querySelectorAll('.skill-example').forEach(b => b.onclick = () => {
+    createForm.rental_skill.value = b.dataset.skill;
+    syncSkillCounter();
+  });
+  syncRentalFields();
+  syncSkillCounter();
   $('#create-form').onsubmit = async (e) => {
     e.preventDefault();
     const f = e.target;
     const err = $('#create-error');
     err.hidden = true;
+    if (f.mode.value === 'rental' && [...f.rental_skill.value].length > skillLimit) {
+      err.textContent = 'カスタムSKILLは' + skillLimit + '文字以内で入力してください';
+      err.hidden = false;
+      return;
+    }
     const btn = f.querySelector('button[type=submit]');
     btn.disabled = true; btn.textContent = '作成中…';
     try {
+      const isRental = f.mode.value === 'rental';
       const data = await api('/api/v1/rooms', {
         method: 'POST',
         body: JSON.stringify({
           room_name: f.room_name.value,
           user_name: f.user_name.value,
           agent_count: Number(f.agent_count.value || 5),
-          mode: f.mode.value,
+          mode: isRental ? 'participate' : f.mode.value,
+          agent_source: isRental ? 'rental' : 'external',
+          rental_name: isRental ? f.rental_name.value : '',
+          rental_skill: isRental ? f.rental_skill.value : '',
           is_public: f.is_public.value === 'true',
         }),
       });
@@ -250,6 +306,7 @@ function updateViewBadge(v) {
 }
 
 function renderJoin(data) {
+  const rentalOK = rentalCaps.available && (rentalCaps.supported_counts || []).includes(data.agent_count) && (rentalCaps.supported_modes || []).includes(data.mode || 'turn');
   app.innerHTML = `
     <div class="page"><div class="paper panel" style="max-width:560px;margin:0 auto">
       <span class="sticky">${escapeHtml(data.name)}</span>
@@ -261,25 +318,66 @@ function renderJoin(data) {
         </label>
         ${data.status === 'waiting' ? `<div class="field"><span class="field-label">参加方法</span>
           <div class="radio-cards">
-            <label class="radio-card"><input type="radio" name="mode" value="participate" checked>
+            <label class="radio-card"><input type="radio" name="mode" value="rental" ${rentalOK ? 'checked' : 'disabled'}>
+              <span class="card-inner">レンタルAI<small>設定なしで参加</small></span></label>
+            <label class="radio-card"><input type="radio" name="mode" value="participate" ${rentalOK ? '' : 'checked'}>
               <span class="card-inner">AIも参加</span></label>
             <label class="radio-card"><input type="radio" name="mode" value="spectate">
               <span class="card-inner">観戦のみ</span></label>
+          </div>
+          <div id="rental-fields-join" class="rental-fields" ${rentalOK ? '' : 'hidden'}>
+            <label class="field"><span class="field-label">AIの名前</span>
+              <input type="text" name="rental_name" maxlength="24" placeholder="例: そらとぶピカチュウ">
+            </label>
+            <div class="field"><span class="field-label">カスタムSKILL <small class="field-hint-inline">性格・話し方・戦い方の希望（任意）</small></span>
+              <textarea name="rental_skill" rows="3" maxlength="200" placeholder="例: 穏やかな口調で、発言の矛盾と投票先を重視してください。怪しい人にもまず質問し、根拠を短く説明してください。"></textarea>
+              <div class="skill-footer"><span class="skill-examples">
+                <button type="button" class="btn btn--tiny skill-example" data-skill="慎重に推理する口調で、根拠を述べてから結論を出します。焦って吊り先を決めず、矛盾点を質問で確かめます。">慎重派</button>
+                <button type="button" class="btn btn--tiny skill-example" data-skill="積極的に意見を出す口調で、怪しい人にははっきり投票します。率先して議論を引っ張ります。">積極派</button>
+                <button type="button" class="btn btn--tiny skill-example" data-skill="聞き役に回る口調で、他者の発言を整理して質問します。目立たないが、投票は筋を通します。">聞き役</button>
+              </span><span class="skill-counter" id="join-skill-counter">0 / 200</span></div>
+            </div>
           </div>
         </div>` : '<p class="field-hint">試合は始まっています。観戦者として入室できます。</p><input type="hidden" name="mode" value="spectate">'}
         <div id="join-error" class="field-error" hidden></div>
         <button class="btn btn--primary btn--large" type="submit" style="width:100%">入室する</button>
       </form>
     </div></div>`;
+  const jf = $('#join-form');
+  const skillLimit = rentalCaps.max_skill_length || 200;
+  if (jf.mode) {
+    jf.addEventListener('change', () => { const rf = $('#rental-fields-join'); if (rf) rf.hidden = jf.mode.value !== 'rental'; });
+    if (jf.rental_skill) {
+      jf.rental_skill.addEventListener('input', () => {
+        $('#join-skill-counter').textContent = [...jf.rental_skill.value].length + ' / ' + skillLimit;
+      });
+      jf.querySelectorAll('.skill-example').forEach(b => b.onclick = () => {
+        jf.rental_skill.value = b.dataset.skill;
+        $('#join-skill-counter').textContent = [...jf.rental_skill.value].length + ' / ' + skillLimit;
+      });
+    }
+  }
   $('#join-form').onsubmit = async (e) => {
     e.preventDefault();
     const f = e.target;
     const err = $('#join-error');
     err.hidden = true;
+    const isRental = f.mode.value === 'rental';
+    if (isRental && [...f.rental_skill.value].length > skillLimit) {
+      err.textContent = 'カスタムSKILLは' + skillLimit + '文字以内で入力してください';
+      err.hidden = false;
+      return;
+    }
     try {
       const out = await api(`/api/v1/rooms/${data.room_id}/join`, {
         method: 'POST',
-        body: JSON.stringify({ name: f.name.value, mode: f.mode.value }),
+        body: JSON.stringify({
+          name: f.name.value,
+          mode: isRental ? 'participate' : f.mode.value,
+          agent_source: isRental ? 'rental' : 'external',
+          rental_name: isRental ? f.rental_name.value : '',
+          rental_skill: isRental ? f.rental_skill.value : '',
+        }),
       });
       state.room = out;
       try { await refreshHistory(out.room_id, 0); } catch (_) { /* 通知の再接続時に再取得する */ }
@@ -349,8 +447,15 @@ function seatListHtml(data) {
     if (!s.user_name && !s.team_name) cls.push('empty');
     if (s.connected) cls.push('connected');
     if (!s.alive) cls.push('dead');
-    const name = s.user_name || (s.connected ? s.team_name : '空席');
-    const sub = s.is_mine ? 'あなた' : (s.game_name || s.team_name || '');
+    const isRental = s.source === 'rental';
+    const name = isRental ? (s.rental_name || 'レンタルAI') : (s.user_name || (s.connected ? s.team_name : '空席'));
+    let sub = s.is_mine ? 'あなた' : (s.game_name || s.team_name || '');
+    if (isRental) {
+      const st = { preparing: '準備中…', ready: '準備できました', playing: '参戦中', degraded: '代替行動中', finished: '終了', failed: '準備に失敗' }[s.rental_state] || '準備中…';
+      sub = 'レンタルAI · ' + st + (s.is_mine ? '（あなたのAI）' : '');
+      if (!s.is_mine && s.user_name) sub = s.user_name + ' · ' + sub;
+      if (s.is_mine && s.rental_error) sub += ' — ' + s.rental_error;
+    }
     return `<li class="${cls.join(' ')}">
       <span class="seat-dot"></span>
       <span class="seat-name">${escapeHtml(name)}</span>
@@ -404,6 +509,30 @@ function rightPanelHtml(data) {
 }
 
 function inviteHtml(data) {
+  const mySeat = data.seats.find(s => s.is_mine);
+  if (mySeat && mySeat.source === 'rental') {
+    const stLabel = { preparing: '準備中…', ready: '準備できました', playing: '参戦中', degraded: '代替行動中', finished: '終了', failed: '準備に失敗' }[mySeat.rental_state] || '準備中…';
+    return `<div class="paper panel invite-box">
+    <h3>レンタルAI</h3>
+    <p class="field-hint"><strong>${escapeHtml(mySeat.rental_name || 'レンタルAI')}</strong> — ${escapeHtml(stLabel)}${mySeat.rental_error ? '（' + escapeHtml(mySeat.rental_error) + '）' : ''}</p>
+    ${mySeat.key_phrase ? `<p class="field-hint">視点をひらくキーフレーズ: <code>${escapeHtml(mySeat.key_phrase)}</code> <button class="btn btn--tiny" id="btn-copy-phrase" type="button">コピー</button></p>
+    <p class="field-hint">ゲーム開始後に「自分のAIの視点をひらく」で入力すると、自分のAIの視点で見られます。</p>` : ''}
+    <button class="btn btn--small" id="btn-share">🔗 観戦URLをコピー</button>
+    <details class="rental-edit" style="margin-top:10px"><summary class="field-hint" style="cursor:pointer;font-weight:700">AIの設定を変更</summary>
+      <form id="rental-edit-form" style="margin-top:8px">
+        <label class="field"><span class="field-label">AIの名前</span>
+          <input type="text" name="rental_name" maxlength="24" value="${escapeHtml(mySeat.rental_name || '')}">
+        </label>
+        <div class="field"><span class="field-label">カスタムSKILL</span>
+          <textarea name="rental_skill" rows="3" maxlength="200">${escapeHtml(mySeat.rental_skill || '')}</textarea>
+          <div class="skill-footer"><span></span><span class="skill-counter" id="edit-skill-counter">0 / 200</span></div>
+        </div>
+        <button class="btn btn--small" type="submit">保存して再接続</button>
+        <p class="field-hint">開始前のみ変更できます。</p>
+      </form>
+    </details>
+  </div>`;
+  }
   return `<div class="paper panel invite-box">
     <h3>招待</h3>
     <button class="btn btn--small" id="btn-share">🔗 観戦URLをコピー</button>
@@ -505,6 +634,33 @@ function bindRoomEvents(data) {
   if (bcg) bcg.onclick = () => {
     copyTextarea($('#invite-text'), '案内をコピーしました');
   };
+  const bcp = $('#btn-copy-phrase');
+  if (bcp) bcp.onclick = () => {
+    const code = bcp.parentElement?.querySelector('code');
+    if (code && navigator.clipboard) navigator.clipboard.writeText(code.textContent).then(() => toast('キーフレーズをコピーしました'));
+  };
+  const ref = $('#rental-edit-form');
+  if (ref) {
+    const ef = ref;
+    const skillLimit = rentalCaps.max_skill_length || 200;
+    const ec = $('#edit-skill-counter');
+    const syncEdit = () => { if (ec) ec.textContent = [...ef.rental_skill.value].length + ' / ' + skillLimit; };
+    ef.rental_skill.addEventListener('input', syncEdit);
+    syncEdit();
+    ef.onsubmit = async (e) => {
+      e.preventDefault();
+      if ([...ef.rental_skill.value].length > skillLimit) { toast('SKILLが長すぎます'); return; }
+      try {
+        const out = await api(`/api/v1/rooms/${data.room_id}/rental`, {
+          method: 'PUT',
+          body: JSON.stringify({ rental_name: ef.rental_name.value, rental_skill: ef.rental_skill.value }),
+        });
+        state.room = out;
+        renderRoomView(out);
+        toast('AIの設定を更新しました');
+      } catch (ex) { toast(ex.message); }
+    };
+  }
   document.querySelectorAll('.mobile-tabs .btn').forEach(b => {
     b.onclick = () => {
       const g = $('#room-grid');

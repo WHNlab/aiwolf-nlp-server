@@ -16,6 +16,12 @@ services:
       PUBLIC_WS_URL: "${PUBLIC_WS_URL:-wss://zinro-ws.nyaolab.com/ws}"
       SECRET_KEY: "${SECRET_KEY:-}"
       AIWOLF_REPLAY_DIR: "/data/room-replays"
+      AIWOLF_DATA_DIR: "/data"
+      # レンタルAI（運営提供のOpenAI呼び出し）。未設定ならレンタルは無効。
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      # 予算上限（USD）。未設定・0ならレンタルは無効のまま。
+      AIWOLF_RENTAL_DAILY_USD: "${AIWOLF_RENTAL_DAILY_USD:-}"
+      AIWOLF_RENTAL_MATCH_USD: "${AIWOLF_RENTAL_MATCH_USD:-}"
     volumes:
       - ./config:/config
       - ./log:/log

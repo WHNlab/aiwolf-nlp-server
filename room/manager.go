@@ -4,11 +4,14 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/aiwolfdial/aiwolf-nlp-server/logic"
 	"github.com/aiwolfdial/aiwolf-nlp-server/model"
@@ -22,12 +25,58 @@ import (
 type Manager struct {
 	base       model.Config // サーバ起動時の設定。ルームごとに人数だけ差し替えたコピーを使う。
 	newObserve func() observer.GameObserver
+	rental     atomic.Value // RentalDriver。r.mu 内でも安全に読むためatomicにする
+	rentalMu   sync.Mutex   // レンタル席の可否確認と確保を直列化する。常に最外側で取る。
 	mu         sync.Mutex
 	rooms      map[string]*Room
 	archiveDir string
 	sessions   map[string]*Session
 	seatTokens sync.Map // トークン→*Seat。r.muの内側でも書き込めるようsync.Mapにする。
 	seatConns  sync.Map // *Seat → *model.Connection（ゲーム開始時に束ねる）
+}
+
+// RentalDriver はレンタルAIの実行管理を抽象化する。
+// room は呼び出しだけを担い、実装は rental パッケージが提供する。
+type RentalDriver interface {
+	// Available はレンタルが現在利用可能かを返す。理由はユーザー向けの簡潔な文言。
+	Available() (bool, string)
+	// Attach は席へ内部エージェントを接続する。失敗時はエラーを返す（接続の成否は
+	// 非同期にonStateで報告されうる）。名前・スキルの変更は新しいworkerに適用される。
+	Attach(r *Room, seat *Seat, name, skill string, onState func(state, msg string)) error
+	// Detach は席に紐づくworkerを止める。未接続なら何もしない。
+	Detach(seat *Seat)
+}
+
+// SetRentalDriver はレンタル実装を登録する。
+func (m *Manager) SetRentalDriver(d RentalDriver) {
+	m.rental.Store(d)
+	slog.Info("レンタルAIドライバを登録しました")
+}
+
+func (m *Manager) rentalDriver() RentalDriver {
+	if v := m.rental.Load(); v != nil {
+		return v.(RentalDriver)
+	}
+	return nil
+}
+
+// RentalCapabilities はUI向けの利用可否を返す。
+func (m *Manager) RentalCapabilities() map[string]any {
+	d := m.rentalDriver()
+	ok, reason := false, "レンタルAIは現在利用できません"
+	if d != nil {
+		ok, reason = d.Available()
+	}
+	if m.base.Game.Talk.Duration != nil || m.base.Game.Whisper.Duration != nil {
+		ok, reason = false, "ターン制のルームのみレンタルAIに対応しています"
+	}
+	return map[string]any{
+		"available":        ok,
+		"reason":           reason,
+		"max_skill_length": 200,
+		"supported_counts": []int{5},
+		"supported_modes":  []string{"turn"},
+	}
 }
 
 func NewManager(base model.Config, observerFactory func() observer.GameObserver) *Manager {
@@ -74,11 +123,40 @@ func (m *Manager) Session(token string) *Session {
 // ---- 部屋 ----
 
 type CreateParams struct {
-	RoomName   string
-	UserName   string
-	AgentCount int
-	Mode       string // "participate" or "spectate"
-	Public     bool
+	RoomName    string
+	UserName    string
+	AgentCount  int
+	Mode        string // "participate" or "spectate"
+	Public      bool
+	AgentSource string // "external"（既定）または "rental"
+	RentalName  string
+	RentalSkill string
+}
+
+// normalizeRentalProfile は入力を検証し、補正済みの値を返す。UTF-8と制御文字を確認する。
+func normalizeRentalProfile(name, skill string) (string, string, error) {
+	name = strings.TrimSpace(name)
+	skill = strings.TrimSpace(skill)
+	if name == "" {
+		name = "レンタルAI"
+	}
+	if len([]rune(name)) > maxAINameLen {
+		return "", "", ErrNameTooLong
+	}
+	if len([]rune(skill)) > maxSkillLen {
+		return "", "", ErrSkillTooLong
+	}
+	for _, s := range []string{name, skill} {
+		if !utf8.ValidString(s) {
+			return "", "", ErrInvalidInput
+		}
+		for _, r := range s {
+			if r < 0x20 && r != '\n' && r != '\t' {
+				return "", "", ErrInvalidInput
+			}
+		}
+	}
+	return name, skill, nil
 }
 
 // CreateRoom は部屋を作り、作成者をホストとして登録する。
@@ -127,15 +205,65 @@ func (m *Manager) CreateRoom(sess *Session, p CreateParams) (*Room, error) {
 	m.rooms[r.ID] = r
 	m.mu.Unlock()
 
+	// レンタル可否の確認はr.mu取得前に行う（m.muとのロック順を守るため）。
+	// rentalMuは確認→席確保→Attachまで保持し、同時1席制限の競合を防ぐ。
+	// r.Configとr.AgentCntは生成時に確定し以後変わらない。
+	if p.AgentSource == "rental" {
+		m.rentalMu.Lock()
+		defer m.rentalMu.Unlock()
+	}
+	if p.Mode == "spectate" && p.AgentSource == "rental" {
+		m.mu.Lock()
+		delete(m.rooms, r.ID)
+		m.mu.Unlock()
+		return nil, ErrInvalidInput
+	}
+	switch p.AgentSource {
+	case "", "external":
+	case "rental":
+		if _, _, err := normalizeRentalProfile(p.RentalName, p.RentalSkill); err != nil {
+			m.mu.Lock()
+			delete(m.rooms, r.ID)
+			m.mu.Unlock()
+			return nil, err
+		}
+		if err := m.checkRentalUsable(r, sess.UserID); err != nil {
+			m.mu.Lock()
+			delete(m.rooms, r.ID)
+			m.mu.Unlock()
+			return nil, err
+		}
+	default:
+		m.mu.Lock()
+		delete(m.rooms, r.ID)
+		m.mu.Unlock()
+		return nil, ErrInvalidInput
+	}
+
 	r.mu.Lock()
 	member := &Member{UserID: sess.UserID, Name: p.UserName, IsHost: true, Joined: time.Now()}
 	r.Members[sess.UserID] = member
-	if p.Mode != "spectate" {
+	var rentalSeat *Seat
+	switch {
+	case p.Mode == "spectate":
+	case p.AgentSource == "rental":
+		name, skill, _ := normalizeRentalProfile(p.RentalName, p.RentalSkill)
+		seat := m.addSeatLocked(r, member)
+		seat.Source = "rental"
+		seat.RentalName = name
+		seat.RentalSkill = skill
+		seat.RentalState = "preparing"
+		seat.InternalToken = genToken(24)
+		rentalSeat = seat
+	case p.AgentSource == "" || p.AgentSource == "external":
 		m.addSeatLocked(r, member)
 	}
 	m.addPlaceholderSeatsLocked(r)
 	r.mu.Unlock()
 	slog.Info("ルームを作成しました", "room", r.ID, "name", r.Name, "agents", r.AgentCnt)
+	if rentalSeat != nil {
+		m.attachRental(r, rentalSeat)
+	}
 	return r, nil
 }
 
@@ -217,7 +345,7 @@ func (m *Manager) ListRooms(status, query string) []map[string]any {
 }
 
 // Join はユーザーを部屋へ入室させる。mode=participate なら空席を1つ確保する。
-func (m *Manager) Join(r *Room, sess *Session, name, mode string) (*Member, error) {
+func (m *Manager) Join(r *Room, sess *Session, name, mode, agentSource, rentalName, rentalSkill string) (*Member, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, ErrNameRequired
@@ -228,6 +356,26 @@ func (m *Manager) Join(r *Room, sess *Session, name, mode string) (*Member, erro
 	m.mu.Lock()
 	sess.Name = name
 	m.mu.Unlock()
+
+	// レンタル可否の確認はr.mu取得前に行う（ロック順 m.mu → r.mu を守るため）。
+	// Config/AgentCntは作成後不変なのでロックなしで読める。既存メンバーの再入室では
+	// ここを通っても席は再確保されないので問題ない。
+	if agentSource == "rental" {
+		m.rentalMu.Lock()
+		defer m.rentalMu.Unlock()
+		if mode != "participate" {
+			return nil, ErrInvalidInput
+		}
+		var err error
+		if rentalName, rentalSkill, err = normalizeRentalProfile(rentalName, rentalSkill); err != nil {
+			return nil, err
+		}
+		if err := m.checkRentalUsable(r, sess.UserID); err != nil {
+			return nil, err
+		}
+	} else if agentSource != "" && agentSource != "external" {
+		return nil, ErrInvalidInput
+	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -251,11 +399,32 @@ func (m *Manager) Join(r *Room, sess *Session, name, mode string) (*Member, erro
 	member := &Member{UserID: sess.UserID, Name: name, IsHost: false, Joined: time.Now()}
 	r.Members[sess.UserID] = member
 	if available != nil {
+		switch agentSource {
+		case "", "external":
+		case "rental":
+			// 検証・上限確認はr.mu取得前にrentalMu配下で済ませている。
+			available.Source = "rental"
+			available.RentalName = rentalName
+			available.RentalSkill = rentalSkill
+			available.RentalState = "preparing"
+			available.InternalToken = genToken(24)
+		default:
+			delete(r.Members, sess.UserID)
+			return nil, ErrInvalidInput
+		}
 		available.UserID = sess.UserID
 		available.UserName = name
 		member.SeatID = available.ID
 	}
 	m.broadcastLocked(r)
+	// Attach はロック内で呼ぶが、接続自体はworkerのgoroutineが非同期で行う。
+	if available != nil && available.Source == "rental" {
+		if err := m.attachRental(r, available); err != nil {
+			available.RentalState = "failed"
+			available.RentalError = "レンタルAIを開始できませんでした"
+			m.broadcastLocked(r)
+		}
+	}
 	return member, nil
 }
 
@@ -292,6 +461,13 @@ func (m *Manager) AgentJoin(roomID, token string, conn *model.Connection) error 
 	if r.Status != StatusWaiting {
 		return ErrAlreadyStarted
 	}
+	if seat.Source == "rental" {
+		// レンタル席には内部ワーカー専用トークンでのみ接続する。seat_tokenを知っていても外部からは入れない。
+		tok := conn.Header.Get("X-Rental-Token")
+		if tok == "" || tok != seat.InternalToken {
+			return ErrInvalidToken
+		}
+	}
 	if seat.Connected {
 		slog.Warn("席への再接続を受け付けました", "room", roomID, "seat", seat.ID)
 		if old, ok := m.seatConns.Load(seat); ok {
@@ -322,6 +498,21 @@ func (m *Manager) watchSeat(r *Room, seat *Seat, conn *model.Connection) {
 	seat.Connected = false
 	seat.Team = ""
 	seat.Original = ""
+	if seat.Source == "rental" && r.Status == StatusWaiting {
+		// 接続を張り替えた直後なら、古いワーカーの切断で席を壊さない。
+		// InternalTokenはAttachごとに更新されるため、不一致は交代済みを意味する。
+		tok := ""
+		if conn.Header != nil {
+			tok = conn.Header.Get("X-Rental-Token")
+		}
+		if tok == seat.InternalToken {
+			seat.RentalState = "failed"
+			seat.RentalError = "レンタルAIの接続が切れました"
+			if d := m.rentalDriver(); d != nil {
+				d.Detach(seat)
+			}
+		}
+	}
 	m.broadcastLocked(r)
 	slog.Info("待機中のAIが切断しました", "room", r.ID, "seat", seat.ID)
 }
@@ -333,6 +524,124 @@ func containsSeat(seats []*Seat, target *Seat) bool {
 		}
 	}
 	return false
+}
+
+// checkRentalUsable はルーム種別・全体可用性・ユーザー別上限を確認する。
+// r.mu・m.mu を保持せず rentalMu 保持中に呼ぶ。
+func (m *Manager) checkRentalUsable(r *Room, userID string) error {
+	d := m.rentalDriver()
+	if d == nil {
+		return ErrRentalUnavailable
+	}
+	if ok, _ := d.Available(); !ok {
+		return ErrRentalUnavailable
+	}
+	if r.Config.Game.Talk.Duration != nil || r.Config.Game.Whisper.Duration != nil || r.AgentCnt != 5 {
+		return ErrInvalidInput
+	}
+	if m.countRentalSeats(userID, r.ID) >= maxRentalPerUser {
+		return errors.New("レンタルAIの同時利用は1席までです")
+	}
+	return nil
+}
+
+// countRentalSeats は指定ユーザーの稼働中・待機中レンタル席数を返す。
+func (m *Manager) countRentalSeats(userID, excludeRoomID string) int {
+	m.mu.Lock()
+	rooms := make([]*Room, 0, len(m.rooms))
+	for _, r := range m.rooms {
+		rooms = append(rooms, r)
+	}
+	m.mu.Unlock()
+	n := 0
+	for _, r := range rooms {
+		if r.ID == excludeRoomID {
+			continue
+		}
+		r.mu.Lock()
+		active := r.Status == StatusWaiting || r.Status == StatusStarting || r.Status == StatusRunning
+		if active {
+			for _, s := range r.Seats {
+				if s.Source == "rental" && s.UserID == userID {
+					n++
+				}
+			}
+		}
+		r.mu.Unlock()
+	}
+	return n
+}
+
+// attachRental は席に内部workerを割り当てる。r.mu 保持中に呼ぶ。
+func (m *Manager) attachRental(r *Room, seat *Seat) error {
+	d := m.rentalDriver()
+	if d == nil {
+		return ErrRentalUnavailable
+	}
+	// 接続ごとに内部トークンを更新し、古いワーカーの切断・応答が
+	// 新しいワーカーの席を壊さないようにする。
+	seat.InternalToken = genToken(24)
+	roomID := r.ID
+	seatID := seat.ID
+	return d.Attach(r, seat, seat.RentalName, seat.RentalSkill, func(state, msg string) {
+		m.updateRentalState(roomID, seatID, state, msg)
+	})
+}
+
+// updateRentalState はworkerからの状態通知を席へ反映する。
+func (m *Manager) updateRentalState(roomID, seatID, state, msg string) {
+	m.mu.Lock()
+	r := m.rooms[roomID]
+	m.mu.Unlock()
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	for _, s := range r.Seats {
+		if s.ID == seatID {
+			s.RentalState = state
+			if msg != "" {
+				s.RentalError = msg
+			}
+			if state == "ready" || state == "playing" {
+				s.RentalError = ""
+			}
+			break
+		}
+	}
+	m.broadcastLocked(r)
+	r.mu.Unlock()
+}
+
+// UpdateRental は待機中のレンタル席の名前・SKILLを更新し、接続をやり直す。席所有者のみ。
+func (m *Manager) UpdateRental(r *Room, sess *Session, name, skill string) error {
+	if sess == nil {
+		return ErrNotAllowed
+	}
+	name, skill, err := normalizeRentalProfile(name, skill)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.Status != StatusWaiting {
+		return ErrAlreadyStarted
+	}
+	seat := r.seatByUser(sess.UserID)
+	if seat == nil || seat.Source != "rental" {
+		return ErrSeatNotClaimable
+	}
+	seat.RentalName = name
+	seat.RentalSkill = skill
+	seat.RentalState = "preparing"
+	seat.RentalError = ""
+	err = m.attachRental(r, seat)
+	if err != nil {
+		seat.RentalState = "failed"
+		seat.RentalError = "レンタルAIを開始できませんでした"
+	}
+	m.broadcastLocked(r)
+	return err
 }
 
 // Start はホスト操作でゲームを開始する。
@@ -459,17 +768,33 @@ func (m *Manager) Leave(r *Room, sess *Session) error {
 			if old, ok := m.seatConns.LoadAndDelete(seat); ok {
 				old.(*model.Connection).Conn.Close()
 			}
+			if seat.Source == "rental" {
+				if d := m.rentalDriver(); d != nil {
+					d.Detach(seat)
+				}
+				seat.RentalState = "failed"
+			}
 		}
 		m.closeSubscribersLocked(r)
 	} else if seat := r.seatByUser(sess.UserID); seat != nil {
 		if old, ok := m.seatConns.LoadAndDelete(seat); ok {
 			old.(*model.Connection).Conn.Close()
 		}
+		if seat.Source == "rental" {
+			if d := m.rentalDriver(); d != nil {
+				d.Detach(seat)
+			}
+		}
 		seat.UserID = ""
 		seat.UserName = ""
 		seat.Connected = false
 		seat.Team = ""
 		seat.Original = ""
+		seat.Source = "external"
+		seat.RentalName = ""
+		seat.RentalSkill = ""
+		seat.RentalState = ""
+		seat.InternalToken = ""
 		member.SeatID = ""
 	}
 	delete(r.Members, sess.UserID)
@@ -491,6 +816,11 @@ func (m *Manager) Close(r *Room, sess *Session) error {
 	for _, seat := range r.Seats {
 		if old, ok := m.seatConns.LoadAndDelete(seat); ok {
 			old.(*model.Connection).Conn.Close()
+		}
+		if seat.Source == "rental" {
+			if d := m.rentalDriver(); d != nil {
+				d.Detach(seat)
+			}
 		}
 	}
 	m.broadcastLocked(r)

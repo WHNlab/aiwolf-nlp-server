@@ -4,6 +4,10 @@
 
 人狼知能コンテスト（自然言語部門） のゲームサーバです。
 
+## ベースプロジェクト
+
+このプロジェクトは [aiwolfdial/aiwolf-nlp-server](https://github.com/aiwolfdial/aiwolf-nlp-server) をベースに、Web UI・ルーム管理・対戦記録などを追加した派生プロジェクトです。元のプロジェクトの著作権表示とライセンスは [LICENSE](/LICENSE) を参照してください。
+
 サンプルエージェントについては、[aiwolfdial/aiwolf-nlp-agent](https://github.com/aiwolfdial/aiwolf-nlp-agent) を参考にしてください。
 
 ## 公開サーバ
@@ -14,6 +18,10 @@
 - エージェント接続用 WebSocket: wss://zinro-ws.nyaolab.com/ws
 
 Web UI で部屋を作成し、発行される接続情報（`room_id` と `seat_token` 付きのURL）をエージェントに指定してください。
+
+### レンタルAI
+
+APIキーやCLIを用意せず、ブラウザだけでAIを参加させられます。ルーム作成・入室時に「レンタルAI」を選び、AIの名前と200文字までのカスタムSKILL（性格・話し方・戦い方の希望）を入力してください。サーバ側の `OPENAI_API_KEY`（モデル gpt-5.6-luna）で推論します。初版は5人・ターン制のみ、同時1席/ユーザー・全体5席までです。利用量は `AIWOLF_DATA_DIR` の `rental-usage.json` に保存し、`AIWOLF_RENTAL_DAILY_USD` / `AIWOLF_RENTAL_MATCH_USD` で上限を設定します。
 
 公開ルームはトップページから検索・入室できます。作成時に非公開を選ぶと一覧には出ず、RoomIDを知る人だけが開けます。終了した対戦の公開可能な会話・結果は30日間保存され、トップページの「最近の対戦記録」またはRoomIDから見返せます。Composeでは `aiwolf-replays` ボリュームに保存します。従来のメモリ上の対戦履歴は、更新前に終了したものを復元できません。
 

@@ -82,12 +82,14 @@ func (s *Server) buildWebRouter() *gin.Engine {
 	rooms.POST("/:id/close", s.checkOrigin(), s.handleCloseRoom)
 	rooms.POST("/:id/start", s.checkOrigin(), s.handleStartRoom)
 	rooms.POST("/:id/claim", s.checkOrigin(), s.handleClaimSeat)
+	rooms.PUT("/:id/rental", s.checkOrigin(), s.handleUpdateRental)
 	rooms.POST("/:id/consultations", s.checkOrigin(), s.handleSendAdvice)
 	rooms.GET("/:id/consultations", s.handleListConsultations)
 	rooms.GET("/:id/invite", s.handleAgentInvite)
 	rooms.GET("/:id", s.handleGetRoom)
 	rooms.GET("/:id/history", s.handleRoomHistory)
 	rooms.GET("/:id/events", s.handleRoomEvents)
+	api.GET("/rental-capabilities", s.handleRentalCapabilities)
 	return router
 }
 
@@ -192,6 +194,8 @@ func jsonError(c *gin.Context, err error) {
 		code = http.StatusUnauthorized
 	case room.ErrNotReady:
 		code = http.StatusConflict
+	case room.ErrRentalUnavailable:
+		code = http.StatusServiceUnavailable
 	}
 	c.JSON(code, gin.H{"error": err.Error()})
 }
@@ -234,11 +238,14 @@ func (s *Server) handleRoomPresets(c *gin.Context) {
 func (s *Server) handleCreateRoom(c *gin.Context) {
 	sess, fresh := s.session(c)
 	var body struct {
-		RoomName   string `json:"room_name"`
-		UserName   string `json:"user_name"`
-		AgentCount int    `json:"agent_count"`
-		Mode       string `json:"mode"`
-		IsPublic   *bool  `json:"is_public"`
+		RoomName    string `json:"room_name"`
+		UserName    string `json:"user_name"`
+		AgentCount  int    `json:"agent_count"`
+		Mode        string `json:"mode"`
+		IsPublic    *bool  `json:"is_public"`
+		AgentSource string `json:"agent_source"`
+		RentalName  string `json:"rental_name"`
+		RentalSkill string `json:"rental_skill"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "不正なリクエストです"})
@@ -246,11 +253,14 @@ func (s *Server) handleCreateRoom(c *gin.Context) {
 	}
 	isPublic := body.IsPublic == nil || *body.IsPublic
 	r, err := s.roomManager.CreateRoom(sess, room.CreateParams{
-		RoomName:   body.RoomName,
-		UserName:   body.UserName,
-		AgentCount: body.AgentCount,
-		Mode:       body.Mode,
-		Public:     isPublic,
+		RoomName:    body.RoomName,
+		UserName:    body.UserName,
+		AgentCount:  body.AgentCount,
+		Mode:        body.Mode,
+		Public:      isPublic,
+		AgentSource: body.AgentSource,
+		RentalName:  body.RentalName,
+		RentalSkill: body.RentalSkill,
 	})
 	if err != nil {
 		jsonError(c, err)
@@ -285,14 +295,17 @@ func (s *Server) handleJoinRoom(c *gin.Context) {
 	sess, _ := s.session(c)
 	s.setSessionCookie(c, sess)
 	var body struct {
-		Name string `json:"name"`
-		Mode string `json:"mode"`
+		Name        string `json:"name"`
+		Mode        string `json:"mode"`
+		AgentSource string `json:"agent_source"`
+		RentalName  string `json:"rental_name"`
+		RentalSkill string `json:"rental_skill"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "不正なリクエストです"})
 		return
 	}
-	if _, err := s.roomManager.Join(r, sess, body.Name, body.Mode); err != nil {
+	if _, err := s.roomManager.Join(r, sess, body.Name, body.Mode, body.AgentSource, body.RentalName, body.RentalSkill); err != nil {
 		jsonError(c, err)
 		return
 	}
@@ -497,4 +510,33 @@ func (s *Server) handleAgentInvite(c *gin.Context) {
 		c.Header("Content-Disposition", `attachment; filename="invite.json"`)
 	}
 	c.JSON(http.StatusOK, invite)
+}
+
+// handleUpdateRental は待機中のレンタル席のAI名・カスタムSKILLを更新する。席の所有者のみ。
+func (s *Server) handleUpdateRental(c *gin.Context) {
+	r := s.roomParam(c)
+	if r == nil {
+		jsonError(c, room.ErrRoomNotFound)
+		return
+	}
+	sess, _ := s.session(c)
+	var body struct {
+		RentalName  string `json:"rental_name"`
+		RentalSkill string `json:"rental_skill"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "不正なリクエストです"})
+		return
+	}
+	if err := s.roomManager.UpdateRental(r, sess, body.RentalName, body.RentalSkill); err != nil {
+		jsonError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, r.Project(sess))
+}
+
+// handleRentalCapabilities はレンタルAIの利用可否を返す。キー・内部設定は返さない。
+func (s *Server) handleRentalCapabilities(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, s.roomManager.RentalCapabilities())
 }

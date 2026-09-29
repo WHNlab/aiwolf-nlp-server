@@ -33,25 +33,30 @@ const (
 )
 
 var (
-	ErrRoomNotFound     = errors.New("部屋が見つかりません")
-	ErrInvalidInput     = errors.New("入力が不正です")
-	ErrNameRequired     = errors.New("名前を入力してください")
-	ErrNameTooLong      = errors.New("名前が長すぎます")
-	ErrRoomNameTooLong  = errors.New("ルーム名が長すぎます")
-	ErrRoomFull         = errors.New("参加枠が埋まっています")
-	ErrAlreadyStarted   = errors.New("ゲームは既に開始されています")
-	ErrNotReady         = errors.New("まだ開始できません")
-	ErrNotHost          = errors.New("ホストのみ実行できます")
-	ErrNotAllowed       = errors.New("権限がありません")
-	ErrInvalidPhrase    = errors.New("キーフレーズを確認してください")
-	ErrInvalidToken     = errors.New("招待トークンが無効です")
-	ErrSeatNotClaimable = errors.New("この席は利用できません")
+	ErrRoomNotFound      = errors.New("部屋が見つかりません")
+	ErrInvalidInput      = errors.New("入力が不正です")
+	ErrNameRequired      = errors.New("名前を入力してください")
+	ErrNameTooLong       = errors.New("名前が長すぎます")
+	ErrRoomNameTooLong   = errors.New("ルーム名が長すぎます")
+	ErrRoomFull          = errors.New("参加枠が埋まっています")
+	ErrAlreadyStarted    = errors.New("ゲームは既に開始されています")
+	ErrNotReady          = errors.New("まだ開始できません")
+	ErrNotHost           = errors.New("ホストのみ実行できます")
+	ErrNotAllowed        = errors.New("権限がありません")
+	ErrInvalidPhrase     = errors.New("キーフレーズを確認してください")
+	ErrInvalidToken      = errors.New("招待トークンが無効です")
+	ErrSeatNotClaimable  = errors.New("この席は利用できません")
+	ErrRentalUnavailable = errors.New("レンタルAIは現在利用できません")
+	ErrSkillTooLong      = errors.New("カスタムSKILLは200文字以内で入力してください")
 )
 
 const (
-	maxUserNameLen = 24
-	maxRoomNameLen = 48
-	maxConsultLen  = 1000
+	maxUserNameLen   = 24
+	maxRoomNameLen   = 48
+	maxConsultLen    = 1000
+	maxAINameLen     = 24
+	maxSkillLen      = 200 // Unicodeコードポイントで数える。性格・戦略の希望で、秘密ではない
+	maxRentalPerUser = 1
 )
 
 // Seat はAIが座る席。SeatContext経由で接続と結びつく。
@@ -70,6 +75,13 @@ type Seat struct {
 	AgentIdx  int  // ゲーム開始後のidx。未割当は0
 	Alive     bool
 	Role      string // ゲーム開始後の役職（投影用）
+	// レンタルAI用のメタ情報。Source=="rental" の席は内部ワーカーが接続する。
+	Source        string // "external"（既定）または "rental"
+	RentalName    string // ユーザーが付けたAI名
+	RentalSkill   string // カスタムSKILL（性格・戦略の希望。秘密情報ではない）
+	RentalState   string // preparing / ready / playing / degraded / finished / failed
+	RentalError   string // 所有者向けの簡潔な失敗理由
+	InternalToken string // 内部ワーカー専用トークン。外部接続を拒否するための第二キー
 }
 
 // Member はルームへ入室した人間の記録。
@@ -292,6 +304,17 @@ func (r *Room) Project(sess *Session) map[string]any {
 			"alive":     s.Alive,
 			"agent_idx": s.AgentIdx,
 			"is_mine":   sess != nil && s.UserID == sess.UserID,
+			"source":    s.Source,
+		}
+		if s.Source == "rental" {
+			entry["rental_name"] = s.RentalName
+			entry["rental_state"] = s.RentalState
+			if sess != nil && s.UserID == sess.UserID {
+				entry["rental_skill"] = s.RentalSkill
+				entry["rental_error"] = s.RentalError
+				// レンタルAIは外部エージェントがいないため、キーフレーズを所有者へ直接見せる。
+				entry["key_phrase"] = s.KeyPhrase
+			}
 		}
 		if s.Connected {
 			entry["team_name"] = s.Team
@@ -308,6 +331,7 @@ func (r *Room) Project(sess *Session) map[string]any {
 		"room_id":      r.ID,
 		"name":         r.Name,
 		"status":       string(r.Status),
+		"mode":         r.modeName(),
 		"is_public":    r.Public,
 		"agent_count":  r.AgentCnt,
 		"connected":    r.connectedCount(),
@@ -420,6 +444,14 @@ func seatDisplayName(s *Seat) string {
 	return s.UserName
 }
 
+// modeName は通信方式の表示名を返す。
+func (r *Room) modeName() string {
+	if r.Config.Game.Talk.Duration != nil || r.Config.Game.Whisper.Duration != nil {
+		return "freeform"
+	}
+	return "turn"
+}
+
 // judgeResults は本人宛ての占い・霊媒結果を読みやすい形で返す。r.mu 保持中に呼ぶ。
 func (r *Room) judgeResults(kind string, agentIdx int) []map[string]any {
 	results := []map[string]any{}
@@ -448,11 +480,12 @@ func (r *Room) InviteFor(sess *Session, wsBase string) map[string]any {
 	if seat == nil {
 		return nil
 	}
-	url := wsBase + "?room_id=" + r.ID + "&seat_token=" + seat.Token
-	mode := "turn"
-	if r.Config.Game.Talk.Duration != nil || r.Config.Game.Whisper.Duration != nil {
-		mode = "freeform"
+	if seat.Source == "rental" {
+		// レンタル席はサーバ内ワーカーが制御するため、接続情報は提供しない。
+		return nil
 	}
+	url := wsBase + "?room_id=" + r.ID + "&seat_token=" + seat.Token
+	mode := r.modeName()
 	config, _ := json.MarshalIndent(map[string]any{"ws_url": url, "room_id": r.ID, "mode": mode}, "", "  ")
 	guide := "人狼参加キットを展開し、SKILL.mdの手順で参加してください。追加のLLM APIキーは不要です。\n" +
 		"以下をinvite.jsonとして保存してください（この席の所有者とAIだけで扱う秘密情報です）。\n" + string(config) + "\n\n" +
