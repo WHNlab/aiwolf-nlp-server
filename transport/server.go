@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -17,6 +18,7 @@ import (
 	"github.com/aiwolfdial/aiwolf-nlp-server/observer"
 	"github.com/aiwolfdial/aiwolf-nlp-server/observer/livestate"
 	"github.com/aiwolfdial/aiwolf-nlp-server/orchestrator"
+	"github.com/aiwolfdial/aiwolf-nlp-server/rental"
 	"github.com/aiwolfdial/aiwolf-nlp-server/room"
 	"github.com/aiwolfdial/aiwolf-nlp-server/service"
 	"github.com/aiwolfdial/aiwolf-nlp-server/util"
@@ -28,6 +30,7 @@ type Server struct {
 	upgrader            websocket.Upgrader
 	manager             *orchestrator.GameManager
 	roomManager         *room.Manager
+	rentalManager       *rental.Manager
 	liveState           *livestate.LiveState
 	jsonLogger          *service.JSONLogger
 	gameLogger          *service.GameLogger
@@ -80,6 +83,14 @@ func NewServer(config model.Config) (*Server, error) {
 		if err := server.roomManager.InitArchive(); err != nil {
 			return nil, err
 		}
+		// レンタルAIはWebルームにのみ適用する。OPENAI_API_KEY未設定なら
+		// ドライバ自体は登録するが Available() が false を返す。
+		dataDir := os.Getenv("AIWOLF_DATA_DIR")
+		if dataDir == "" {
+			dataDir = filepath.Join("data")
+		}
+		server.rentalManager = rental.NewManager(config, os.Getenv("OPENAI_API_KEY"), dataDir)
+		server.roomManager.SetRentalDriver(server.rentalManager)
 	}
 	return server, nil
 }
@@ -112,6 +123,9 @@ func (s *Server) Run() {
 	go func() {
 		<-ctx.Done()
 		slog.Info("シグナルを受信しました")
+		if s.rentalManager != nil {
+			s.rentalManager.Close()
+		}
 		s.manager.BeginShutdown()
 		s.manager.WaitAllFinished()
 		stop()

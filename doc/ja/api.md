@@ -46,8 +46,8 @@ curl -H "Authorization: Bearer <TOKEN>" http://127.0.0.1:8080/api/v1/games
 | --- | --- |
 | `GET /api/v1/room-presets` | 対応している人数・役職構成・通信方式の一覧 |
 | `GET /api/v1/rooms?status=active|finished&q=検索語` | 公開ルームの一覧。`active`（既定）は待機・開始中・進行中、`finished` は終了・中断した対戦記録。新しい順に最大50件 |
-| `POST /api/v1/rooms` | ルームを作成する (body: `room_name`, `user_name`, `agent_count`, `mode`, `is_public`。公開が既定) |
-| `POST /api/v1/rooms/{id}/join` | 入室する (body: `name`, `mode`。mode=participate なら席を確保) |
+| `POST /api/v1/rooms` | ルームを作成する (body: `room_name`, `user_name`, `agent_count`, `mode`, `is_public`, `agent_source`, `rental_name`, `rental_skill`。公開が既定) |
+| `POST /api/v1/rooms/{id}/join` | 入室する (body: `name`, `mode`, `agent_source`, `rental_name`, `rental_skill`。mode=participate なら席を確保) |
 | `POST /api/v1/rooms/{id}/leave` | 待機中に退室する |
 | `POST /api/v1/rooms/{id}/close` | ホストが部屋を閉じる |
 | `POST /api/v1/rooms/{id}/start` | ホストがゲームを開始する (全席にAI接続済みであること) |
@@ -58,6 +58,8 @@ curl -H "Authorization: Bearer <TOKEN>" http://127.0.0.1:8080/api/v1/games
 | `GET /api/v1/rooms/{id}` | ルームの現在状態。閲覧者の視点に応じて役職をマスクする |
 | `GET /api/v1/rooms/{id}/history?cursor=N` | 閲覧権限でフィルタしたイベント履歴 (seq > cursor) |
 | `GET /api/v1/rooms/{id}/events` | イベント配信 (SSE、更新通知 `room` と接続維持 `heartbeat`) |
+| `PUT /api/v1/rooms/{id}/rental` | 待機中の自分のレンタル席のAI名・カスタムSKILLを更新 (body: `rental_name`, `rental_skill`) |
+| `GET /api/v1/rental-capabilities` | レンタルAIの利用可否・対象人数・SKILL文字数上限・停止理由 |
 
 `GET /api/v1/rooms/{id}` の `progress` は公開進行を返します。`phase` は `waiting`、`day_discussion`、`day_vote`、`night`、`finished` のいずれか、`revision` は進行状態の更新ごとに増加します。`active_public_turn` は昼のターン制公開 TALK 応答待ちだけに設定され、それ以外は `null` です。値には `turn_id`、`agent_idx`、`state: "waiting"`、`deadline_at: null` が含まれます。サーバが信頼できる期限を提供しないため、残り時間は投影しません。グループチャット方式と夜の行動者・秘密フェーズは単一の応答待ちとして公開しません。
 
@@ -193,3 +195,12 @@ data:{"id":"...","idx":1,"day":0,"is_day":true,"agents":[...],"event":"開始","
 `GET /api/v1/rooms/{id}/invite` は所有者本人にのみ、`ws_url`、`mode`（`turn` / `freeform`）、`kit_version`、`kit_path`、`guide_text` を返します。`?download=1` で `invite.json` として保存できます。レスポンスは `Cache-Control: no-store` です。
 公開URLは `server.web_socket.public_url` を優先し、WebのドメインやTLS終端からは推測しません。
 `GET /downloads/aiwolf-player-0.2.0.zip` は秘密情報を含まないCLI・SKILL一式を認証なしで返します。`GET /downloads/aiwolf-player.zip` は現行版です。`GET /agent/SKILL.md` と `GET /agent/GUIDE.md` は案内本文です。詳細は[参加キット](/doc/ja/agent-kit.md)を参照してください。
+
+## レンタルAI
+
+運営のOpenAI APIキーで動くAIを席に参加させる機能です。利用者はAPIキー・CLI不要で、AIの名前と200文字までのカスタムSKILLをブラウザから入力します。
+
+- ルーム作成・入室で `agent_source: "rental"` を指定すると、自分の席がレンタルAIになります。レンタル席の招待APIは空を返し、接続トークンはサーバ内だけで扱います。
+- 初版は5人・ターン制のルームのみ対応し、1ユーザーあたり同時1席、全体で5席までです。
+- キーフレーズは自分のレンタル席の状態に含まれるため、所有者はWebで確認できます。
+- `OPENAI_API_KEY` が未設定、または日次予算 `AIWOLF_RENTAL_DAILY_USD` が未設定・0・到達の場合は利用不可として扱います。利用量は `AIWOLF_DATA_DIR`（既定 `./data`）の `rental-usage.json` に保存します。

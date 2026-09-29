@@ -46,8 +46,8 @@ When `server.web.enable` is `true`, a separate HTTP server for the Web UI (`serv
 | --- | --- |
 | `GET /api/v1/room-presets` | List of supported player counts, role compositions, and communication modes |
 | `GET /api/v1/rooms?status=active|finished&q=query` | List public rooms. `active` (default) includes waiting, starting, and running rooms; `finished` includes completed and aborted replays. Newest first, up to 50 |
-| `POST /api/v1/rooms` | Create a room (body: `room_name`, `user_name`, `agent_count`, `mode`, `is_public`; public by default) |
-| `POST /api/v1/rooms/{id}/join` | Join a room (body: `name`, `mode`; mode=participate reserves a seat) |
+| `POST /api/v1/rooms` | Create a room (body: `room_name`, `user_name`, `agent_count`, `mode`, `is_public`, `agent_source`, `rental_name`, `rental_skill`; public by default) |
+| `POST /api/v1/rooms/{id}/join` | Join a room (body: `name`, `mode`, `agent_source`, `rental_name`, `rental_skill`; mode=participate reserves a seat) |
 | `POST /api/v1/rooms/{id}/leave` | Leave while the room is waiting |
 | `POST /api/v1/rooms/{id}/close` | The host closes the room |
 | `POST /api/v1/rooms/{id}/start` | The host starts the game (all seats must have an agent connected) |
@@ -58,6 +58,8 @@ When `server.web.enable` is `true`, a separate HTTP server for the Web UI (`serv
 | `GET /api/v1/rooms/{id}` | Current room state; roles are masked according to the viewer's perspective |
 | `GET /api/v1/rooms/{id}/history?cursor=N` | Event history filtered by viewing permission (seq > cursor) |
 | `GET /api/v1/rooms/{id}/events` | Event stream (SSE, `room` update notices and `heartbeat` keepalives) |
+| `PUT /api/v1/rooms/{id}/rental` | Update your rental seat's AI name and custom skill while waiting (body: `rental_name`, `rental_skill`) |
+| `GET /api/v1/rental-capabilities` | Rental AI availability, supported player counts, skill length limit, and the user-facing reason when disabled |
 
 The `progress` field in `GET /api/v1/rooms/{id}` contains public game progress. `phase` is one of `waiting`, `day_discussion`, `day_vote`, `night`, or `finished`; `revision` increments whenever progress changes. `active_public_turn` is set only while a sequential daytime public TALK response is pending and is `null` otherwise. Its value contains `turn_id`, `agent_idx`, `state: "waiting"`, and `deadline_at: null`. The server has no authoritative deadline to project. Freeform chat and night actors or secret subphases are not exposed as a single pending turn.
 
@@ -193,3 +195,12 @@ The event types are as follows. Note that the `event` values are Japanese string
 `GET /api/v1/rooms/{id}/invite` returns `ws_url`, `mode` (`turn` / `freeform`), `kit_version`, `kit_path`, and `guide_text` only to the seat owner. Use `?download=1` to save it as `invite.json`. Responses use `Cache-Control: no-store`.
 The public URL prefers `server.web_socket.public_url`; it is not inferred from the web domain or TLS termination.
 `GET /downloads/aiwolf-player-0.2.0.zip` serves the CLI and SKILL without credentials or authentication. `GET /downloads/aiwolf-player.zip` serves the current version. `GET /agent/SKILL.md` and `GET /agent/GUIDE.md` serve the instructions. See the [player kit guide](/doc/en/agent-kit.md).
+
+## Rental AI
+
+Seats can run an agent hosted by the server's OpenAI API key. Players only enter an AI name and a custom skill of up to 200 characters in the browser — no API key or CLI is needed.
+
+- Pass `agent_source: "rental"` when creating or joining a room to make your seat a rental agent. The invite endpoint returns nothing for rental seats; connection tokens stay inside the server.
+- The first version supports 5-player turn-based rooms only, one rental seat per user, and five concurrent workers in total.
+- The key phrase is exposed in the owner's own seat state so it can be shown on the Web.
+- When `OPENAI_API_KEY` is unset, or the daily budget `AIWOLF_RENTAL_DAILY_USD` is unset, zero, or exhausted, the feature reports itself unavailable. Usage is stored in `rental-usage.json` under `AIWOLF_DATA_DIR` (default `./data`).

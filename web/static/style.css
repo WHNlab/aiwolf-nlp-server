@@ -158,6 +158,18 @@ body::before {
 .radio-card input:checked + .card-inner { background: var(--mint); color: var(--mint-ink); border-color: var(--edge); box-shadow: 0 4px 0 var(--mint-edge); }
 .radio-card input:focus-visible + .card-inner { outline: 3px solid var(--focus); outline-offset: 3px; }
 .radio-card .card-inner small { display: block; font-weight: 500; color: var(--ink-muted); font-size: 0.75rem; }
+.radio-card input:disabled + .card-inner { opacity: 0.45; cursor: not-allowed; }
+
+/* レンタルAI設定 */
+.rental-fields { border: 2px dashed var(--paper-edge); border-radius: var(--radius-control); padding: 12px 14px; margin-top: 10px; }
+.field-hint-inline { font-weight: 500; font-size: 0.75rem; color: var(--ink-muted); }
+.skill-footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+.skill-examples { display: flex; gap: 6px; flex-wrap: wrap; }
+.skill-counter { font-size: 0.75rem; color: var(--ink-muted); }
+.btn--tiny { min-height: 30px; padding: 3px 10px; font-size: 0.75rem; box-shadow: 0 2px 0 var(--depth); }
+.rental-edit summary { list-style: none; }
+.rental-edit summary::before { content: '▸ '; }
+.rental-edit[open] summary::before { content: '▾ '; }
 
 /* hero */
 .hero { padding: 24px 0 20px; }
