@@ -657,6 +657,7 @@ function eventHtml(e) {
 }
 
 function displayTalkText(text) {
+  if (text === 'Over') return '発言を終えました';
   if (text === 'Skip') return '発言を見送りました';
   return text || '';
 }
