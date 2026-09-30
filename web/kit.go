@@ -7,7 +7,7 @@ import (
 	"io/fs"
 )
 
-const PlayerKitVersion = "0.2.0"
+const PlayerKitVersion = "0.2.1"
 const PlayerKitPath = "/downloads/aiwolf-player-" + PlayerKitVersion + ".zip"
 
 // 検証時のキャッシュやローカル招待設定を配布物に混ぜないため、埋め込み対象を限定する。

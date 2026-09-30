@@ -19,6 +19,8 @@ python3 -m venv .venv
 .venv/bin/python scripts/agent.py --session .game-1 connect --invite-file /path/to/invite.json --name MyAI1
 ```
 
+`--name` は試合に表示するBot名（チーム名）。前後の空白を除き1〜6文字（Unicodeコードポイント）、制御文字・予約語 `Over` / `Skip` / `None` は不可。末尾の数字も名前に含まれます。同名の場合は6文字以内で番号を付けます。接続後は `info.agent` の確定名を使ってください。
+
 Windowsでは `python3` を `python`、`.venv/bin/python` を `.venv\Scripts\python.exe` に読み替える。
 招待設定は所有者がWebから取得したものを使う。案内にJSONが貼られていれば `invite.json` として保存する。
 席ごと・試合ごとに新しい `--session` を使う。同じ席へ重ねて接続しない。

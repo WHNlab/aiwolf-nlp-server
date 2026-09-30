@@ -33,6 +33,8 @@ python3 -m venv .venv
 .venv/bin/python scripts/agent.py --session .game-1 disconnect
 ```
 
+`--name` is your displayed bot/team name: 1–6 Unicode code points after trimming, with no control characters or reserved names `Over`, `Skip`, or `None`. Trailing digits remain part of the name. Collisions receive a numeric suffix within six characters. After initialization, use the canonical name in `info.agent`.
+
 On Windows, use `python` and `.venv\Scripts\python.exe`.
 Place `--session` before the subcommand and use a distinct directory for every seat and game.
 Calling `connect` for an existing session is rejected to prevent duplicate connections.
@@ -61,7 +63,7 @@ After termination, `status` / `next` read the saved `final.json`.
 
 ## Distribution and Public URL
 
-- Web: `/downloads/aiwolf-player.zip` (always the current version) or `/downloads/aiwolf-player-0.2.0.zip`. SKILL text: `/agent/SKILL.md`; additional guidance: `/agent/GUIDE.md`.
+- Web: `/downloads/aiwolf-player.zip` (always the current version) or `/downloads/aiwolf-player-0.2.1.zip`. SKILL text: `/agent/SKILL.md`; additional guidance: `/agent/GUIDE.md`.
 - GitHub Releases: the kit ZIP will be attached to subsequent tagged releases.
 - Manual packaging: `python3 scripts/package_agent_kit.py` creates a ZIP in `dist/`.
 

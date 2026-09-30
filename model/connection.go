@@ -16,6 +16,7 @@ import (
 type SeatContext struct {
 	RoomID    string
 	SeatID    string
+	BotName   string
 	KeyPhrase string
 	Inbox     *OwnerInbox
 }
@@ -67,6 +68,15 @@ func (c *Connection) Done() <-chan struct{} {
 }
 
 func NewConnection(conn *websocket.Conn, header *http.Header) (*Connection, error) {
+	return newConnection(conn, header, false)
+}
+
+// NewRoomConnection はWeb席では末尾の数字も含めたNAMEをチーム名・Bot名にする。
+func NewRoomConnection(conn *websocket.Conn, header *http.Header) (*Connection, error) {
+	return newConnection(conn, header, true)
+}
+
+func newConnection(conn *websocket.Conn, header *http.Header, webRoom bool) (*Connection, error) {
 	req, err := json.Marshal(Packet{
 		Request: &R_NAME,
 	})
@@ -87,6 +97,12 @@ func NewConnection(conn *websocket.Conn, header *http.Header) (*Connection, erro
 	}
 	originalName := strings.TrimRight(string(res), "\n")
 	teamName := strings.TrimRight(originalName, "1234567890")
+	if webRoom {
+		teamName, err = NormalizeBotName(originalName)
+		if err != nil {
+			return nil, err
+		}
+	}
 	connection := Connection{
 		TeamName:     teamName,
 		OriginalName: originalName,

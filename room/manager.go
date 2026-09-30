@@ -140,8 +140,10 @@ func normalizeRentalProfile(name, skill string) (string, string, error) {
 	if name == "" {
 		name = "レンタルAI"
 	}
-	if len([]rune(name)) > maxAINameLen {
-		return "", "", ErrNameTooLong
+	var err error
+	name, err = model.NormalizeBotName(name)
+	if err != nil {
+		return "", "", err
 	}
 	if len([]rune(skill)) > maxSkillLen {
 		return "", "", ErrSkillTooLong
@@ -259,11 +261,14 @@ func (m *Manager) CreateRoom(sess *Session, p CreateParams) (*Room, error) {
 		m.addSeatLocked(r, member)
 	}
 	m.addPlaceholderSeatsLocked(r)
+	if rentalSeat != nil {
+		if err := m.attachRental(r, rentalSeat); err != nil {
+			rentalSeat.RentalState = "failed"
+			rentalSeat.RentalError = "レンタルAIを開始できませんでした"
+		}
+	}
 	r.mu.Unlock()
 	slog.Info("ルームを作成しました", "room", r.ID, "name", r.Name, "agents", r.AgentCnt)
-	if rentalSeat != nil {
-		m.attachRental(r, rentalSeat)
-	}
 	return r, nil
 }
 
@@ -468,6 +473,10 @@ func (m *Manager) AgentJoin(roomID, token string, conn *model.Connection) error 
 			return ErrInvalidToken
 		}
 	}
+	botName, err := model.NormalizeBotName(conn.TeamName)
+	if err != nil {
+		return err
+	}
 	if seat.Connected {
 		slog.Warn("席への再接続を受け付けました", "room", roomID, "seat", seat.ID)
 		if old, ok := m.seatConns.Load(seat); ok {
@@ -475,9 +484,9 @@ func (m *Manager) AgentJoin(roomID, token string, conn *model.Connection) error 
 		}
 	}
 	seat.Connected = true
-	seat.Team = conn.TeamName
+	seat.Team = botName
 	seat.Original = conn.OriginalName
-	conn.Seat = &model.SeatContext{RoomID: roomID, SeatID: seat.ID, KeyPhrase: seat.KeyPhrase, Inbox: seat.Inbox}
+	conn.Seat = &model.SeatContext{RoomID: roomID, SeatID: seat.ID, BotName: botName, KeyPhrase: seat.KeyPhrase, Inbox: seat.Inbox}
 	m.seatConns.Store(seat, conn)
 	go m.watchSeat(r, seat, conn)
 	m.broadcastLocked(r)
@@ -581,15 +590,21 @@ func (m *Manager) attachRental(r *Room, seat *Seat) error {
 	// 接続ごとに内部トークンを更新し、古いワーカーの切断・応答が
 	// 新しいワーカーの席を壊さないようにする。
 	seat.InternalToken = genToken(24)
+	// 応答確認中は以前の接続を人数に含めず、未準備のまま開始できないようにする。
+	seat.Connected = false
+	if old, ok := m.seatConns.LoadAndDelete(seat); ok {
+		old.(*model.Connection).Conn.Close()
+	}
 	roomID := r.ID
 	seatID := seat.ID
+	token := seat.InternalToken
 	return d.Attach(r, seat, seat.RentalName, seat.RentalSkill, func(state, msg string) {
-		m.updateRentalState(roomID, seatID, state, msg)
+		m.updateRentalState(roomID, seatID, token, state, msg)
 	})
 }
 
 // updateRentalState はworkerからの状態通知を席へ反映する。
-func (m *Manager) updateRentalState(roomID, seatID, state, msg string) {
+func (m *Manager) updateRentalState(roomID, seatID, token, state, msg string) {
 	m.mu.Lock()
 	r := m.rooms[roomID]
 	m.mu.Unlock()
@@ -597,20 +612,24 @@ func (m *Manager) updateRentalState(roomID, seatID, state, msg string) {
 		return
 	}
 	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.Status == StatusClosed {
+		return
+	}
 	for _, s := range r.Seats {
-		if s.ID == seatID {
+		if s.ID == seatID && s.Source == "rental" && s.InternalToken == token {
+			if state == "finished" && msg == "" {
+				msg = s.RentalError
+			}
+			if s.RentalState == state && s.RentalError == msg {
+				return
+			}
 			s.RentalState = state
-			if msg != "" {
-				s.RentalError = msg
-			}
-			if state == "ready" || state == "playing" {
-				s.RentalError = ""
-			}
-			break
+			s.RentalError = msg
+			m.broadcastLocked(r)
+			return
 		}
 	}
-	m.broadcastLocked(r)
-	r.mu.Unlock()
 }
 
 // UpdateRental は待機中のレンタル席の名前・SKILLを更新し、接続をやり直す。席所有者のみ。

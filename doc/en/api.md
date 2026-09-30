@@ -194,7 +194,7 @@ The event types are as follows. Note that the `event` values are Japanese string
 
 `GET /api/v1/rooms/{id}/invite` returns `ws_url`, `mode` (`turn` / `freeform`), `kit_version`, `kit_path`, and `guide_text` only to the seat owner. Use `?download=1` to save it as `invite.json`. Responses use `Cache-Control: no-store`.
 The public URL prefers `server.web_socket.public_url`; it is not inferred from the web domain or TLS termination.
-`GET /downloads/aiwolf-player-0.2.0.zip` serves the CLI and SKILL without credentials or authentication. `GET /downloads/aiwolf-player.zip` serves the current version. `GET /agent/SKILL.md` and `GET /agent/GUIDE.md` serve the instructions. See the [player kit guide](/doc/en/agent-kit.md).
+`GET /downloads/aiwolf-player-0.2.1.zip` serves the CLI and SKILL without credentials or authentication. `GET /downloads/aiwolf-player.zip` serves the current version. `GET /agent/SKILL.md` and `GET /agent/GUIDE.md` serve the instructions. See the [player kit guide](/doc/en/agent-kit.md).
 
 ## Rental AI
 
@@ -202,5 +202,10 @@ Seats can run an agent hosted by the server's OpenAI API key. Players only enter
 
 - Pass `agent_source: "rental"` when creating or joining a room to make your seat a rental agent. The invite endpoint returns nothing for rental seats; connection tokens stay inside the server.
 - The first version supports 5-player turn-based rooms only, one rental seat per user, and five concurrent workers in total.
-- The key phrase is exposed in the owner's own seat state so it can be shown on the Web.
+- The owner's seat perspective opens automatically using the room session; no key phrase entry is needed.
+- `rental_name` is the team/bot name and must contain 1–6 Unicode code points. Blank defaults to `レンタルAI`. Surrounding whitespace is trimmed; control characters and `Over`, `Skip`, and `None` are rejected. External agents also use their NAME response as their bot name. Names are shared across games, voting targets, and records; collisions receive a numeric suffix within six characters.
+- Both the latest speech and history display full text. Rental agents receive a generation limit calculated from the per-talk cap, base allowance, and remaining allowance. Oversized output is shortened at a complete sentence; if none fits, an ellipsis is added. The owner receives a note when speech is shortened. Text already discarded in historical records cannot be restored.
+- Before connecting, the server verifies that the model returns a structured response (up to 35 seconds, with success or failure shared for 60 seconds). Failed seats have `rental_state: "failed"` and do not count as ready. Only the owner receives `rental_error`. After resolving the cause, repeat `PUT /api/v1/rooms/{id}/rental` to retry; during the cache period it returns the previous result.
+- Generation failures during games also populate `rental_error`, cleared on recovery. Quota, authentication, and other permanent errors immediately set `degraded` without retrying. Only transient 429/5xx responses get one delayed retry. Three consecutive failures or a usage limit also set `degraded` and stop API calls for that match. Fallbacks end speech and automatically choose a legal target.
+- Readiness checks and retries count toward budgets. Explicit 4xx rejections do not count as generation cost. Failure to read or persist usage stops new requests.
 - When `OPENAI_API_KEY` is unset, or the daily budget `AIWOLF_RENTAL_DAILY_USD` is unset, zero, or exhausted, the feature reports itself unavailable. Usage is stored in `rental-usage.json` under `AIWOLF_DATA_DIR` (default `./data`).

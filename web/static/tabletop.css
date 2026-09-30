@@ -285,10 +285,8 @@
 .tt-name {
   font-weight: 700;
   font-size: 0.78rem;
-  max-width: 7em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  max-width: 8em;
+  overflow-wrap: anywhere;
 }
 .tt-extra {
   display: inline-flex;

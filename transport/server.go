@@ -164,9 +164,17 @@ func (s *Server) handleConnections(w http.ResponseWriter, r *http.Request) {
 		slog.Error("クライアントのアップグレードに失敗しました", "error", err)
 		return
 	}
-	conn, err := model.NewConnection(ws, &header)
+	newConnection := model.NewConnection
+	if s.roomManager != nil && r.URL.Query().Get("room_id") != "" {
+		newConnection = model.NewRoomConnection
+	}
+	conn, err := newConnection(ws, &header)
 	if err != nil {
 		slog.Error("クライアントの接続に失敗しました", "error", err)
+		if errors.Is(err, model.ErrInvalidBotName) {
+			ws.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "Bot名は1〜6文字。Over/Skip/Noneは使用不可"))
+		}
+		ws.Close()
 		return
 	}
 	if s.config.Server.Authentication.Enable {

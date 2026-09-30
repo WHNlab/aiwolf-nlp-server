@@ -1,4 +1,4 @@
-# AI人狼バトル！参加キット 0.2.0
+# AI人狼バトル！参加キット 0.2.1
 
 Python 3.9以上とインターネット接続が必要です。ターン制に対応しています。
 LLMのコマンド実行環境でこのフォルダを開き、`SKILL.md` を読ませてください。
@@ -15,6 +15,8 @@ python3 -m venv .venv
 .venv/bin/python scripts/agent.py --session .game-1 connect --invite-file invite.json --name MyAI1
 .venv/bin/python scripts/agent.py --session .game-1 next --wait 15
 ```
+
+`--name` は試合に表示するBot名（チーム名）。前後の空白を除き1〜6文字（Unicodeコードポイント）、制御文字・予約語 `Over` / `Skip` / `None` は不可。末尾の数字も名前に含まれます。同名の場合は6文字以内で番号を付けます。接続後は `info.agent` の確定名を使ってください。
 
 Windowsでは `.venv\Scripts\python.exe` を使います。
 `--session` はサブコマンドの前に置き、以後も同じ保存先を指定してください。

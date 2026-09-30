@@ -3,6 +3,7 @@ package rental
 import (
 	"encoding/json"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -26,7 +27,7 @@ type Budget struct {
 	matchCap float64
 	day      string // YYYY-MM-DD（ローカル日付）
 	spent    float64
-	reserved float64
+	failed   bool
 	matches  map[string]float64
 }
 
@@ -38,7 +39,7 @@ type usageFile struct {
 
 func envUSD(key string) float64 {
 	v, err := strconv.ParseFloat(os.Getenv(key), 64)
-	if err != nil || v < 0 {
+	if err != nil || v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
 		return 0
 	}
 	return v
@@ -115,7 +116,6 @@ func (b *Budget) rollDay() {
 	if t := today(); t != b.day {
 		b.day = t
 		b.spent = 0
-		b.reserved = 0
 		b.matches = map[string]float64{}
 	}
 }
@@ -124,67 +124,73 @@ func (b *Budget) DailyExceeded() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.rollDay()
-	return b.dailyCap > 0 && b.spent+b.reserved >= b.dailyCap
+	return b.failed || b.dailyCap > 0 && b.spent+reservePerCall > b.dailyCap
 }
 
-// MatchSpend は指定ルームの累計費用を返す。
-func (b *Budget) MatchSpend(roomID string) float64 {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.matches[roomID]
-}
-
-// TryReserve は1回分の予算を予約する。予約分を含めて日次上限を超えるなら失敗。
-func (b *Budget) TryReserve() bool {
+// Reserve は試行ごとに日次・部屋の上限を確認し、返却関数で実利用分に精算する。
+func (b *Budget) Reserve(roomID string) (func(usage), error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.rollDay()
-	if b.dailyCap <= 0 || b.spent+b.reserved+reservePerCall > b.dailyCap {
-		return false
+	if b.failed || b.dailyCap <= 0 || b.spent+reservePerCall > b.dailyCap || b.matches[roomID]+reservePerCall > b.matchCap {
+		return nil, errBudget
 	}
-	b.reserved += reservePerCall
-	return true
-}
-
-// Settle はAPI応答のusageで精算する。usage不明なら予約額をそのまま費用にする。
-func (b *Budget) Settle(u usage, roomID string) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.reserved -= reservePerCall
-	if b.reserved < 0 {
-		b.reserved = 0
+	// 応答前の再起動でも予約を失わないよう、上限額を先に記録する。
+	b.spent += reservePerCall
+	b.matches[roomID] += reservePerCall
+	if err := b.save(); err != nil {
+		b.failed = true
+		slog.Error("レンタル利用量を保存できないため受付を停止します", "error", err)
+		return nil, errBudget
 	}
-	cost := reservePerCall
-	if u.InputTokens > 0 || u.OutputTokens > 0 {
-		cost = float64(u.InputTokens)*costPerInputToken + float64(u.OutputTokens)*costPerOutputToken
-	}
-	b.spent += cost
-	b.matches[roomID] += cost
-	b.save()
+	day := b.day
+	var once sync.Once
+	return func(u usage) {
+		once.Do(func() {
+			b.mu.Lock()
+			defer b.mu.Unlock()
+			b.rollDay()
+			if b.day != day {
+				return
+			}
+			cost := reservePerCall
+			if u.Known && u.InputTokens >= 0 && u.OutputTokens >= 0 {
+				cost = float64(u.InputTokens)*costPerInputToken + float64(u.OutputTokens)*costPerOutputToken
+			}
+			b.spent = math.Max(0, b.spent+cost-reservePerCall)
+			b.matches[roomID] = math.Max(0, b.matches[roomID]+cost-reservePerCall)
+			if err := b.save(); err != nil {
+				b.failed = true
+				slog.Error("レンタル利用量の保存に失敗しました", "error", err)
+			}
+		})
+	}, nil
 }
 
 // save はJSONへ原子的に書き出す。b.mu 保持中に呼ぶ。
-func (b *Budget) save() {
+func (b *Budget) save() error {
 	if b.path == "" {
-		return
+		return nil
 	}
 	f := usageFile{Day: b.day, SpentUSD: b.spent, Matches: b.matches}
 	data, err := json.Marshal(f)
 	if err != nil {
-		return
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(b.path), 0700); err != nil {
+		return err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(b.path), ".rental-usage-*")
 	if err != nil {
-		slog.Warn("レンタル利用量の一時ファイル作成に失敗しました", "error", err)
-		return
+		return err
 	}
+	defer os.Remove(tmp.Name())
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
-		os.Remove(tmp.Name())
-		return
+		return err
 	}
-	tmp.Close()
-	if err := os.Rename(tmp.Name(), b.path); err != nil {
-		slog.Warn("レンタル利用量の保存に失敗しました", "error", err)
+	if err := tmp.Close(); err != nil {
+		return err
 	}
+	return os.Rename(tmp.Name(), b.path)
 }

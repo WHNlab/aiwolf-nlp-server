@@ -54,7 +54,6 @@ const (
 	maxUserNameLen   = 24
 	maxRoomNameLen   = 48
 	maxConsultLen    = 1000
-	maxAINameLen     = 24
 	maxSkillLen      = 200 // Unicodeコードポイントで数える。性格・戦略の希望で、秘密ではない
 	maxRentalPerUser = 1
 )
@@ -309,6 +308,10 @@ func (r *Room) Project(sess *Session) map[string]any {
 		if s.Source == "rental" {
 			entry["rental_name"] = s.RentalName
 			entry["rental_state"] = s.RentalState
+			// 夜の応答失敗から役職を推測できないよう、実行中の詳細は所有者にだけ返す。
+			if r.Status == StatusRunning && (sess == nil || s.UserID != sess.UserID) {
+				entry["rental_state"] = "playing"
+			}
 			if sess != nil && s.UserID == sess.UserID {
 				entry["rental_skill"] = s.RentalSkill
 				entry["rental_error"] = s.RentalError
@@ -489,7 +492,7 @@ func (r *Room) InviteFor(sess *Session, wsBase string) map[string]any {
 	config, _ := json.MarshalIndent(map[string]any{"ws_url": url, "room_id": r.ID, "mode": mode}, "", "  ")
 	guide := "人狼参加キットを展開し、SKILL.mdの手順で参加してください。追加のLLM APIキーは不要です。\n" +
 		"以下をinvite.jsonとして保存してください（この席の所有者とAIだけで扱う秘密情報です）。\n" + string(config) + "\n\n" +
-		"CLIで接続し、ホストの開始を待ってください。\n" +
+		"CLIの--nameに1〜6文字のBot名（チーム名）を指定して接続し、ホストの開始を待ってください。この名前が試合にも表示されます。\n" +
 		"待機中は同じ--sessionでnext --wait 15を実行します。通知がなければ最大15秒でwaiting・空のeventsが返ります。その場合だけ5秒sleepして再実行し、最大3回（合計60秒）で打ち切って私に知らせてください。接続プロセスは切らず、LLMの操作を止めます。\n" +
 		"私が再開を指示したら、同じ--sessionでresumeを1回実行して未読通知とpendingを確認してください。connectを再実行しないでください。action_requiredならpending.remaining_seconds以内にactし、expiredなら再送しないでください。\n" +
 		"CLIのローカル制御から25秒応答がなければエラーとして止まり、私に知らせてください。\n" +

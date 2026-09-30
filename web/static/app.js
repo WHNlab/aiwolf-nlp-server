@@ -14,7 +14,26 @@ let feed = null;
 let homeTimer = null;
 let homeSearchTimer = null;
 let routeRevision = 0;
+const rentalRetryPending = new Set();
 let rentalCaps = { available: false, max_skill_length: 200, supported_counts: [5], supported_modes: ['turn'], reason: '' };
+const rentalNameLimit = 6;
+
+function rentalNameLength(value) { return [...value.trim()].length; }
+
+function validateRentalName(input, active = true) {
+  const tooLong = rentalNameLength(input.value) > rentalNameLimit;
+  input.setCustomValidity(active && tooLong ? 'Bot名（チーム名）は6文字以内で入力してください' : '');
+}
+
+function bindRentalNameCounter(input, counter) {
+  const sync = () => {
+    const count = rentalNameLength(input.value);
+    counter.textContent = `${count} / ${rentalNameLimit}`;
+    validateRentalName(input);
+  };
+  input.addEventListener('input', sync);
+  sync();
+}
 
 function toast(msg, ms = 2200) {
   toastEl.textContent = msg;
@@ -132,8 +151,9 @@ async function renderHome(revision) {
             </div>
           </div>
           <div id="rental-fields" class="rental-fields" ${rentalCaps.available ? '' : 'hidden'}>
-            <label class="field"><span class="field-label">AIの名前</span>
-              <input type="text" name="rental_name" maxlength="24" placeholder="例: そらとぶピカチュウ">
+            <label class="field"><span class="field-label">Bot名（チーム名・6文字以内）</span>
+              <input type="text" name="rental_name" placeholder="例: シオン">
+              <small class="field-hint" id="create-rental-name-counter">0 / 6</small>
             </label>
             <div class="field"><span class="field-label">カスタムSKILL <small class="field-hint-inline">性格・話し方・戦い方の希望（任意）</small></span>
               <textarea name="rental_skill" rows="3" maxlength="200" placeholder="例: 穏やかな口調で、発言の矛盾と投票先を重視してください。怪しい人にもまず質問し、根拠を短く説明してください。"></textarea>
@@ -219,6 +239,8 @@ async function renderHome(revision) {
     }
     const show = radio && radio.checked;
     $('#rental-fields').hidden = !show;
+    createForm.rental_name.disabled = !show;
+    validateRentalName(createForm.rental_name, !!show);
     if (show) createForm.rental_name.required = false;
   };
   const syncSkillCounter = () => {
@@ -226,6 +248,7 @@ async function renderHome(revision) {
     $('#skill-counter').textContent = n + ' / ' + skillLimit;
   };
   createForm.addEventListener('change', syncRentalFields);
+  bindRentalNameCounter(createForm.rental_name, $('#create-rental-name-counter'));
   createForm.rental_skill.addEventListener('input', syncSkillCounter);
   createForm.querySelectorAll('.skill-example').forEach(b => b.onclick = () => {
     createForm.rental_skill.value = b.dataset.skill;
@@ -240,6 +263,11 @@ async function renderHome(revision) {
     err.hidden = true;
     if (f.mode.value === 'rental' && [...f.rental_skill.value].length > skillLimit) {
       err.textContent = 'カスタムSKILLは' + skillLimit + '文字以内で入力してください';
+      err.hidden = false;
+      return;
+    }
+    if (f.mode.value === 'rental' && rentalNameLength(f.rental_name.value) > rentalNameLimit) {
+      err.textContent = 'Bot名（チーム名）は6文字以内で入力してください';
       err.hidden = false;
       return;
     }
@@ -279,6 +307,8 @@ async function renderRoom(roomId, revision = routeRevision) {
   document.body.dataset.page = 'room';
   state.events = [];
   state.cursor = 0;
+  try { rentalCaps = await api('/api/v1/rental-capabilities'); } catch (_) { /* 既定値のまま */ }
+  if (revision !== routeRevision) return;
   let data;
   try { data = await api('/api/v1/rooms/' + roomId); }
   catch (e) {
@@ -326,8 +356,9 @@ function renderJoin(data) {
               <span class="card-inner">観戦のみ</span></label>
           </div>
           <div id="rental-fields-join" class="rental-fields" ${rentalOK ? '' : 'hidden'}>
-            <label class="field"><span class="field-label">AIの名前</span>
-              <input type="text" name="rental_name" maxlength="24" placeholder="例: そらとぶピカチュウ">
+            <label class="field"><span class="field-label">Bot名（チーム名・6文字以内）</span>
+              <input type="text" name="rental_name" placeholder="例: シオン">
+              <small class="field-hint" id="join-rental-name-counter">0 / 6</small>
             </label>
             <div class="field"><span class="field-label">カスタムSKILL <small class="field-hint-inline">性格・話し方・戦い方の希望（任意）</small></span>
               <textarea name="rental_skill" rows="3" maxlength="200" placeholder="例: 穏やかな口調で、発言の矛盾と投票先を重視してください。怪しい人にもまず質問し、根拠を短く説明してください。"></textarea>
@@ -346,7 +377,17 @@ function renderJoin(data) {
   const jf = $('#join-form');
   const skillLimit = rentalCaps.max_skill_length || 200;
   if (jf.mode) {
-    jf.addEventListener('change', () => { const rf = $('#rental-fields-join'); if (rf) rf.hidden = jf.mode.value !== 'rental'; });
+    const syncJoinRental = () => {
+      const show = jf.mode.value === 'rental';
+      const rf = $('#rental-fields-join');
+      if (rf) rf.hidden = !show;
+      if (jf.rental_name) {
+        jf.rental_name.disabled = !show;
+        validateRentalName(jf.rental_name, show);
+      }
+    };
+    jf.addEventListener('change', syncJoinRental);
+    syncJoinRental();
     if (jf.rental_skill) {
       jf.rental_skill.addEventListener('input', () => {
         $('#join-skill-counter').textContent = [...jf.rental_skill.value].length + ' / ' + skillLimit;
@@ -356,6 +397,7 @@ function renderJoin(data) {
         $('#join-skill-counter').textContent = [...jf.rental_skill.value].length + ' / ' + skillLimit;
       });
     }
+    if (jf.rental_name) bindRentalNameCounter(jf.rental_name, $('#join-rental-name-counter'));
   }
   $('#join-form').onsubmit = async (e) => {
     e.preventDefault();
@@ -363,6 +405,11 @@ function renderJoin(data) {
     const err = $('#join-error');
     err.hidden = true;
     const isRental = f.mode.value === 'rental';
+    if (isRental && rentalNameLength(f.rental_name.value) > rentalNameLimit) {
+      err.textContent = 'Bot名（チーム名）は6文字以内で入力してください';
+      err.hidden = false;
+      return;
+    }
     if (isRental && [...f.rental_skill.value].length > skillLimit) {
       err.textContent = 'カスタムSKILLは' + skillLimit + '文字以内で入力してください';
       err.hidden = false;
@@ -401,6 +448,10 @@ function renderRoomView(data, hasNewEvents = false, previousRoom = null) {
   const mobileView = $('#room-grid')?.className || 'room-grid';
   const inviteOpen = $('#invite-detail') && !$('#invite-detail').hidden;
   const inviteText = $('#invite-text')?.value || '';
+  const rentalForm = $('#rental-edit-form');
+  const rentalValues = rentalForm?.dataset.roomId === data.room_id ? { name: rentalForm.rental_name.value, skill: rentalForm.rental_skill.value, open: rentalForm.closest('.rental-edit').open } : null;
+  const rentalFocus = rentalForm?.contains(document.activeElement) ? document.activeElement.name : '';
+  const rentalSelection = rentalFocus ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
   const consultText = $('#consult-form textarea')?.value || '';
   const focusedField = document.activeElement === $('#consult-form textarea') ? 'consult' : '';
   const status = data.status;
@@ -433,6 +484,17 @@ function renderRoomView(data, hasNewEvents = false, previousRoom = null) {
     $('#invite-text').value = inviteText;
   }
   if ($('#consult-form textarea')) $('#consult-form textarea').value = consultText;
+  const nextRentalForm = $('#rental-edit-form');
+  if (nextRentalForm && rentalValues) {
+    nextRentalForm.rental_name.value = rentalValues.name;
+    nextRentalForm.rental_skill.value = rentalValues.skill;
+    nextRentalForm.closest('.rental-edit').open = rentalValues.open;
+    if (rentalFocus) {
+      const field = nextRentalForm.elements.namedItem(rentalFocus);
+      field?.focus({ preventScroll: true });
+      if (field && rentalSelection) field.setSelectionRange(...rentalSelection);
+    }
+  }
   bindRoomEvents(data);
   if (focusedField) $('#consult-form textarea')?.focus({ preventScroll: true });
 }
@@ -448,13 +510,15 @@ function seatListHtml(data) {
     if (s.connected) cls.push('connected');
     if (!s.alive) cls.push('dead');
     const isRental = s.source === 'rental';
-    const name = isRental ? (s.rental_name || 'レンタルAI') : (s.user_name || (s.connected ? s.team_name : '空席'));
+    const name = isRental ? (s.rental_name || 'レンタルAI') : (s.connected ? (s.team_name || s.user_name || 'AI') : (s.user_name || '空席'));
     let sub = s.is_mine ? 'あなた' : (s.game_name || s.team_name || '');
     if (isRental) {
-      const st = { preparing: '準備中…', ready: '準備できました', playing: '参戦中', degraded: '代替行動中', finished: '終了', failed: '準備に失敗' }[s.rental_state] || '準備中…';
+      const st = { preparing: 'AIの応答を確認中…', ready: '準備できました', playing: '参戦中', degraded: '代替行動中', finished: '終了', failed: '準備に失敗' }[s.rental_state] || s.rental_state || '状態確認中';
       sub = 'レンタルAI · ' + st + (s.is_mine ? '（あなたのAI）' : '');
       if (!s.is_mine && s.user_name) sub = s.user_name + ' · ' + sub;
       if (s.is_mine && s.rental_error) sub += ' — ' + s.rental_error;
+    } else if (s.connected && s.user_name) {
+      sub = s.is_mine ? `あなた · ${s.user_name}` : `所有者: ${s.user_name}`;
     }
     return `<li class="${cls.join(' ')}">
       <span class="seat-dot"></span>
@@ -473,7 +537,11 @@ function seatListHtml(data) {
 function rightPanelHtml(data) {
   const v = data.viewer;
   const p = data.private_agent;
+  const myRental = data.seats.find(s => s.is_mine && s.source === 'rental');
   let html = '';
+  if (myRental?.rental_error && !['waiting', 'starting'].includes(data.status)) {
+    html += `<div class="paper panel rental-error"><h3>レンタルAIの状態</h3><p class="field-hint">${escapeHtml(myRental.rental_error)}</p></div>`;
+  }
   if (p) {
     const k = p.knowledge || {};
     let know = `<span class="owner-eyebrow">YOUR AGENT</span><span class="own-role">${escapeHtml(roleLabel(p.role))}</span><p class="field-hint">${p.alive ? 'あなたのAIは生存しています' : 'あなたのAIは死亡しました。神視点で観戦できます。'}</p>`;
@@ -511,17 +579,17 @@ function rightPanelHtml(data) {
 function inviteHtml(data) {
   const mySeat = data.seats.find(s => s.is_mine);
   if (mySeat && mySeat.source === 'rental') {
-    const stLabel = { preparing: '準備中…', ready: '準備できました', playing: '参戦中', degraded: '代替行動中', finished: '終了', failed: '準備に失敗' }[mySeat.rental_state] || '準備中…';
+    const stLabel = { preparing: 'AIの応答を確認中…', ready: '準備できました', playing: '参戦中', degraded: '代替行動中', finished: '終了', failed: '準備に失敗' }[mySeat.rental_state] || mySeat.rental_state || '状態確認中';
     return `<div class="paper panel invite-box">
     <h3>レンタルAI</h3>
     <p class="field-hint"><strong>${escapeHtml(mySeat.rental_name || 'レンタルAI')}</strong> — ${escapeHtml(stLabel)}${mySeat.rental_error ? '（' + escapeHtml(mySeat.rental_error) + '）' : ''}</p>
-    ${mySeat.key_phrase ? `<p class="field-hint">視点をひらくキーフレーズ: <code>${escapeHtml(mySeat.key_phrase)}</code> <button class="btn btn--tiny" id="btn-copy-phrase" type="button">コピー</button></p>
-    <p class="field-hint">ゲーム開始後に「自分のAIの視点をひらく」で入力すると、自分のAIの視点で見られます。</p>` : ''}
+    ${mySeat.rental_state === 'failed' ? '<p class="field-hint">原因を解消後、60秒ほど待って再試行してください。</p><button class="btn btn--small" id="btn-retry-rental" type="button">再試行</button>' : ''}
     <button class="btn btn--small" id="btn-share">🔗 観戦URLをコピー</button>
     <details class="rental-edit" style="margin-top:10px"><summary class="field-hint" style="cursor:pointer;font-weight:700">AIの設定を変更</summary>
-      <form id="rental-edit-form" style="margin-top:8px">
-        <label class="field"><span class="field-label">AIの名前</span>
-          <input type="text" name="rental_name" maxlength="24" value="${escapeHtml(mySeat.rental_name || '')}">
+      <form id="rental-edit-form" data-room-id="${escapeHtml(data.room_id)}" style="margin-top:8px">
+        <label class="field"><span class="field-label">Bot名（チーム名・6文字以内）</span>
+          <input type="text" name="rental_name" value="${escapeHtml(mySeat.rental_name || '')}">
+          <small class="field-hint" id="edit-rental-name-counter">${rentalNameLength(mySeat.rental_name || '')} / 6</small>
         </label>
         <div class="field"><span class="field-label">カスタムSKILL</span>
           <textarea name="rental_skill" rows="3" maxlength="200">${escapeHtml(mySeat.rental_skill || '')}</textarea>
@@ -565,10 +633,10 @@ function eventHtml(e) {
   switch (e.type) {
     case 'talk': return `<div class="talk-entry"><div class="avatar">${escapeHtml(initialOf(who))}</div>
       <div class="body"><div class="talk-meta"><span class="talk-name">${escapeHtml(who)}</span></div>
-      <div class="talk-text">${escapeHtml(e.text)}</div></div></div>`;
+      <div class="talk-text">${escapeHtml(displayTalkText(e.text))}</div></div></div>`;
     case 'whisper': return `<div class="talk-entry event-whisper"><div class="avatar">🐺</div>
       <div class="body"><div class="talk-meta"><span class="talk-name">${escapeHtml(who)}</span><span>囁き</span></div>
-      <div class="talk-text">${escapeHtml(e.text)}</div></div></div>`;
+      <div class="talk-text">${escapeHtml(displayTalkText(e.text))}</div></div></div>`;
     case 'vote': return `<div class="event-sys">🗳 ${escapeHtml(who)} → ${escapeHtml(to)}</div>`;
     case 'attack_vote': return `<div class="event-sys event-whisper">🐺 ${escapeHtml(who)} → ${escapeHtml(to)}</div>`;
     case 'execute': return `<div class="event-sys">⚖ ${to ? escapeHtml(to) + 'が' : ''}${escapeHtml(e.text)}</div>`;
@@ -583,6 +651,12 @@ function eventHtml(e) {
     case 'owner_note': return `<div class="consult-msg ai" style="align-self:stretch">${escapeHtml(e.text)}<div class="meta">AI → あなた</div></div>`;
     default: return '';
   }
+}
+
+function displayTalkText(text) {
+  if (text === 'Over') return '発言を終えました';
+  if (text === 'Skip') return '発言を見送りました';
+  return text || '';
 }
 
 function seatNameOf(idx) {
@@ -634,33 +708,61 @@ function bindRoomEvents(data) {
   if (bcg) bcg.onclick = () => {
     copyTextarea($('#invite-text'), '案内をコピーしました');
   };
-  const bcp = $('#btn-copy-phrase');
-  if (bcp) bcp.onclick = () => {
-    const code = bcp.parentElement?.querySelector('code');
-    if (code && navigator.clipboard) navigator.clipboard.writeText(code.textContent).then(() => toast('キーフレーズをコピーしました'));
+  const mine = data.seats.find(s => s.is_mine && s.source === 'rental');
+  const rentalKey = `${data.room_id}:${mine?.seat_id || ''}`;
+  const revision = routeRevision;
+  const currentRoom = () => revision === routeRevision && state.room?.room_id === data.room_id;
+  const syncRentalPending = () => {
+    if (!currentRoom()) return;
+    const pending = rentalRetryPending.has(rentalKey);
+    const retry = $('#btn-retry-rental');
+    if (retry) {
+      retry.disabled = pending;
+      retry.textContent = pending ? '再試行中…' : '再試行';
+    }
+    const submit = $('#rental-edit-form button[type="submit"]');
+    if (submit) submit.disabled = pending;
   };
-  const ref = $('#rental-edit-form');
-  if (ref) {
-    const ef = ref;
+  const updateRental = async (profile, message) => {
+    if (!mine || rentalRetryPending.has(rentalKey)) return;
+    rentalRetryPending.add(rentalKey);
+    syncRentalPending();
+    try {
+      const out = await api(`/api/v1/rooms/${data.room_id}/rental`, { method: 'PUT', body: JSON.stringify(profile) });
+      if (!currentRoom()) return;
+      state.room = out;
+      renderRoomView(out);
+      toast(message);
+    } catch (ex) {
+      if (!currentRoom()) return;
+      toast(ex.message);
+      try {
+        const latest = await api(`/api/v1/rooms/${data.room_id}`);
+        if (currentRoom()) { state.room = latest; renderRoomView(latest); }
+      } catch (_) { /* 次のSSE更新で表示を追いつかせる */ }
+    } finally {
+      rentalRetryPending.delete(rentalKey);
+      syncRentalPending();
+    }
+  };
+  const retry = $('#btn-retry-rental');
+  if (retry) retry.onclick = () => updateRental({ rental_name: mine.rental_name || '', rental_skill: mine.rental_skill || '' }, 'レンタルAIを再試行しています');
+  const ef = $('#rental-edit-form');
+  if (ef) {
     const skillLimit = rentalCaps.max_skill_length || 200;
+    bindRentalNameCounter(ef.rental_name, $('#edit-rental-name-counter'));
     const ec = $('#edit-skill-counter');
     const syncEdit = () => { if (ec) ec.textContent = [...ef.rental_skill.value].length + ' / ' + skillLimit; };
     ef.rental_skill.addEventListener('input', syncEdit);
     syncEdit();
-    ef.onsubmit = async (e) => {
+    ef.onsubmit = (e) => {
       e.preventDefault();
+      if (rentalNameLength(ef.rental_name.value) > rentalNameLimit) { toast('Bot名（チーム名）は6文字以内で入力してください'); return; }
       if ([...ef.rental_skill.value].length > skillLimit) { toast('SKILLが長すぎます'); return; }
-      try {
-        const out = await api(`/api/v1/rooms/${data.room_id}/rental`, {
-          method: 'PUT',
-          body: JSON.stringify({ rental_name: ef.rental_name.value, rental_skill: ef.rental_skill.value }),
-        });
-        state.room = out;
-        renderRoomView(out);
-        toast('AIの設定を更新しました');
-      } catch (ex) { toast(ex.message); }
+      updateRental({ rental_name: ef.rental_name.value, rental_skill: ef.rental_skill.value }, 'AIの設定を更新しました');
     };
   }
+  syncRentalPending();
   document.querySelectorAll('.mobile-tabs .btn').forEach(b => {
     b.onclick = () => {
       const g = $('#room-grid');
@@ -819,20 +921,25 @@ function renderCurrentSpeech() {
   if (key === ui.speechKey) return;
   ui.speechKey = key;
   const focus = document.activeElement?.dataset.action;
-  $('#current-speech').innerHTML = `<section class="paper current-speech" aria-label="最新の発言"><div class="speech-heading"><span class="speech-number">${latest ? String(latest.from_idx).padStart(2, '0') : '…'}</span><div><span class="speech-eyebrow">${ui.channel === 'whisper' ? '人狼だけの会話' : 'LATEST TALK · 最新の公開発言'}</span><h2>${latest ? escapeHtml(seatNameOf(latest.from_idx)) : '最初の発言を待っています'}</h2></div></div><p class="speech-text">${escapeHtml(latest?.text || 'AIたちの会話が始まると、ここに届きます。')}</p><div class="speech-actions"><span class="field-hint">${latest ? `${latest.day}日目` : '発言・投票はAIが行います'}</span><div>${hasWhisper ? `<button class="btn btn--small" data-action="channel">${ui.channel === 'talk' ? '人狼の囁きへ' : '公開会話へ'}</button> ` : ''}${latest ? `<button class="btn btn--small" data-action="full-speech" data-seq="${Number(latest.seq)}">全文を読む ↗</button>` : ''}</div></div></section>`;
+  $('#current-speech').innerHTML = `<section class="paper current-speech" aria-label="最新の発言"><div class="speech-heading"><span class="speech-number">${latest ? String(latest.from_idx).padStart(2, '0') : '…'}</span><div><span class="speech-eyebrow">${ui.channel === 'whisper' ? '人狼だけの会話' : 'LATEST TALK · 最新の公開発言'}</span><h2>${latest ? escapeHtml(seatNameOf(latest.from_idx)) : '最初の発言を待っています'}</h2></div></div><p class="speech-text">${escapeHtml(latest ? displayTalkText(latest.text) : 'AIたちの会話が始まると、ここに届きます。')}</p><div class="speech-actions"><span class="field-hint">${latest ? `${latest.day}日目` : '発言・投票はAIが行います'}</span><div>${hasWhisper ? `<button class="btn btn--small" data-action="channel">${ui.channel === 'talk' ? '人狼の囁きへ' : '公開会話へ'}</button> ` : ''}${latest ? `<button class="btn btn--small" data-action="full-speech" data-seq="${Number(latest.seq)}">全文を読む ↗</button>` : ''}</div></div></section>`;
   if (focus) [...$('#current-speech').querySelectorAll('[data-action]')].find(el => el.dataset.action === focus)?.focus({ preventScroll: true });
 }
 
 function updateOwnerPanel(data) {
   const ui = matchUI;
-  const key = JSON.stringify([data.viewer, data.private_agent, data.status]);
+  const ownerRental = data.seats.find(s => s.is_mine && s.source === 'rental');
+  const key = JSON.stringify([data.viewer, data.private_agent, data.status, ownerRental?.rental_state, ownerRental?.rental_error, ownerRental?.rental_name, ownerRental?.rental_skill]);
   if (key !== ui.ownerKey) {
     const panel = $('#owner-panel');
-    const text = panel.querySelector('textarea')?.value || '';
+    const values = Object.fromEntries([...panel.querySelectorAll('input, textarea')].map(field => [field.name, field.value]));
+    const detailsOpen = panel.querySelector('.rental-edit')?.open;
     const focused = panel.contains(document.activeElement) ? document.activeElement.name : '';
     const selection = focused ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
     panel.innerHTML = rightPanelHtml(data);
-    if (panel.querySelector('textarea')) panel.querySelector('textarea').value = text;
+    for (const field of panel.querySelectorAll('input, textarea')) {
+      if (Object.prototype.hasOwnProperty.call(values, field.name)) field.value = values[field.name];
+    }
+    if (panel.querySelector('.rental-edit')) panel.querySelector('.rental-edit').open = detailsOpen;
     bindRoomEvents(data);
     if (focused) {
       const field = [...panel.querySelectorAll('input, textarea')].find(el => el.name === focused);
