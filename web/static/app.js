@@ -1,5 +1,6 @@
 import { stageHtml } from './tabletop.js?v=__ASSET_VERSION__';
 import { HistoryDrawer } from './history.js?v=__ASSET_VERSION__';
+import { REPLAYABLE_STATUS, isHiddenControlEvent, visibleTimeline, projectRoom, phaseAt, bannerText, replayDelayFor } from './replay.js?v=__ASSET_VERSION__';
 
 // AI人狼バトル！ SPA — ルーム作成・待機・観戦・自分のAI視点
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -437,10 +438,12 @@ function renderJoin(data) {
 async function refreshHistory(roomId, cursor, current = null) {
   const d = await api(`/api/v1/rooms/${roomId}/history?cursor=${cursor}`);
   if (state.room?.room_id !== roomId || (current && !current.active)) return 0;
-  if (cursor === 0) state.events = d.events || [];
-  else state.events.push(...(d.events || []));
+  // 「Over」は会話ではなくターン終了の制御語なので、表示用の履歴からだけ除く。
+  const incoming = (d.events || []).filter(e => !isHiddenControlEvent(e));
+  if (cursor === 0) state.events = incoming;
+  else state.events.push(...incoming);
   state.cursor = d.cursor;
-  return (d.events || []).length;
+  return incoming.length;
 }
 
 function renderRoomView(data, hasNewEvents = false, previousRoom = null) {
@@ -854,6 +857,8 @@ const roleLabel = role => ({ VILLAGER: '村人', SEER: '占い師', MEDIUM: '霊
 
 function destroyMatch() {
   if (!matchUI) return;
+  clearTimeout(matchUI.liveTimer);
+  clearTimeout(matchUI.replayTimer);
   matchUI.history.destroy();
   matchUI.sheet.close();
   matchUI.sheet.remove();
@@ -865,7 +870,7 @@ function renderMatch(data, hasNewEvents = false, previousRoom = null) {
   if (!matchUI || matchUI.roomId !== data.room_id) {
     destroyMatch();
     app.innerHTML = `<div class="match-page"><div class="match-heading"><h1>${escapeHtml(data.name)}</h1><button class="btn btn--small" data-action="menu">ルーム ⋯</button></div>
-      <div class="match-grid"><section class="match-main" aria-label="試合のテーブル"><div id="game-stage"></div><div id="current-speech"></div><div id="match-result"></div></section><aside class="owner-dock"><div id="owner-panel"></div></aside></div>
+      <div class="match-grid"><section class="match-main" aria-label="試合のテーブル"><div id="game-stage"></div><div id="phase-banner" role="status"></div><div id="replay-slot"></div><div id="current-speech"></div><div id="match-result"></div></section><aside class="owner-dock"><div id="owner-panel"></div></aside></div>
       <nav class="match-actions" aria-label="観戦メニュー"><button class="btn btn--primary" data-action="history">▤ 履歴をひらく</button>${data.viewer.own_seat ? '<button class="btn owner-open" data-action="owner">自分のAI</button>' : ''}</nav></div>`;
     const sheet = document.createElement('dialog');
     sheet.className = 'game-sheet';
@@ -873,7 +878,7 @@ function renderMatch(data, hasNewEvents = false, previousRoom = null) {
     sheet.innerHTML = `<header class="sheet-heading"><h2 id="game-sheet-title"></h2><button class="btn sheet-close">閉じる ×</button></header><div class="sheet-body"></div>`;
     document.body.append(sheet);
     const history = new HistoryDrawer({ renderEvent: eventHtml, seatName: seatNameOf });
-    matchUI = { roomId: data.room_id, history, sheet, ownerKey: '', stageKey: '', speechKey: '', lastTalk: null, status: data.status, channel: 'talk', panel: '', trigger: null, previousRoom };
+    matchUI = { roomId: data.room_id, history, sheet, ownerKey: '', stageKey: '', speechKey: '', lastTalk: null, status: data.status, channel: 'talk', panel: '', trigger: null, previousRoom, viewRoom: null, viewEvents: [], pos: 0, mode: 'live', liveTimer: null, replayTimer: null, replay: { playing: false, speed: 1, started: false }, bannerKey: '', resultKey: null };
     sheet.querySelector('.sheet-close').onclick = () => sheet.close();
     sheet.addEventListener('close', () => {
       if (!matchUI || matchUI.sheet !== sheet) return;
@@ -885,44 +890,196 @@ function renderMatch(data, hasNewEvents = false, previousRoom = null) {
     app.onclick = handleMatchClick;
   }
   const ui = matchUI;
-  const latest = state.events.findLast(e => e.type === 'talk');
+  ui.timeline = visibleTimeline(state.events);
+  ui.total = ui.timeline.length;
+  // 終了試合は履歴を時間進行で再生する。途中から見た場合は自動で最初から流す。
+  const replayable = REPLAYABLE_STATUS.includes(data.status);
+  if (ui.pos > ui.total) ui.pos = ui.total;
+  const events = ui.timeline.slice(0, Math.min(ui.pos, ui.total));
+  ui.viewEvents = events;
+  // 再生中はカーソル位置の部屋状態を合成し、最後まで来たら実データ（勝敗・役職）を見せる。
+  ui.viewRoom = replayable ? projectRoom(data, ui.timeline, ui.pos, { revealResult: ui.pos >= ui.total }) : data;
+  const view = ui.viewRoom;
+  const latest = events.findLast(e => e.type === 'talk');
   const online = !document.body.classList.contains('connection-lost');
-  const stageKey = JSON.stringify([data.seats, data.progress, data.status, data.day, data.viewer.own_seat, latest?.seq, online]);
+  const stageKey = JSON.stringify([view.seats, view.progress, view.status, view.day, view.viewer?.own_seat, latest?.seq, online, ui.pos]);
   if (ui.stageKey !== stageKey) {
     const activeSeat = document.activeElement?.dataset.seatId;
-    const phaseChanged = ui.previousRoom?.progress?.phase !== data.progress?.phase;
-    const animate = (hasNewEvents || phaseChanged) && !!ui.previousRoom && !document.hidden && online && !feed?.catchingUp;
+    const phaseChanged = ui.previousRoom?.progress?.phase !== view.progress?.phase;
+    const animate = (hasNewEvents || phaseChanged || replayable) && !!ui.previousRoom && !document.hidden && (online || replayable) && !feed?.catchingUp;
     const talkChanged = ui.lastTalk !== null && latest?.seq !== ui.lastTalk;
-    $('#game-stage').innerHTML = stageHtml(data, state.events, { connected: online, animate, talkChanged, previousRoom: ui.previousRoom });
+    $('#game-stage').innerHTML = stageHtml(view, events, { connected: online, animate, talkChanged, previousRoom: ui.previousRoom });
     if (activeSeat) [...$('#game-stage').querySelectorAll('[data-seat-id]')].find(el => el.dataset.seatId === activeSeat)?.focus({ preventScroll: true });
     ui.stageKey = stageKey;
+    showPhaseBanner(ui, view);
   }
   ui.lastTalk = latest?.seq ?? null;
-  ui.previousRoom = data;
+  ui.previousRoom = view;
   renderCurrentSpeech();
   updateOwnerPanel(data);
-  ui.history.update(state.events, data);
+  ui.history.update(events, view);
   if (ui.panel === 'seat') renderSeatDetail(ui.seatId);
   if (ui.panel === 'menu') renderRoomMenu();
-  if (ui.status !== data.status || !ui.resultRendered) {
-    const finished = ['finished', 'aborted', 'closed'].includes(data.status);
-    $('#match-result').innerHTML = finished ? `<section class="paper match-result ${ui.status === 'running' && data.status === 'finished' ? 'is-new' : ''}"><span class="speech-eyebrow">${data.status === 'finished' ? 'GAME SET' : 'ROOM CLOSED'}</span><h2>${data.status === 'finished' ? `${escapeHtml(data.win_side === 'VILLAGER' ? '村人陣営' : data.win_side === 'WEREWOLF' ? '人狼陣営' : data.win_side || '')}の勝利！` : statusLabel(data.status)}</h2><p>${escapeHtml(data.abort_reason || 'テーブルの席を選んで役職を確認したり、履歴を読み返せます。')}</p><a class="btn" href="#/">新しい部屋へ</a></section>` : '';
-    ui.resultRendered = true;
+  // 勝敗は再生が最後まで進んでから表示する（ライブはリアルタイムどおり）。
+  const resultReady = !replayable || ui.pos >= ui.total;
+  const resultKey = resultReady && replayable ? `${data.status}:${data.win_side}:${data.abort_reason || ''}` : null;
+  if (ui.resultKey !== resultKey) {
+    ui.resultKey = resultKey;
+    $('#match-result').innerHTML = resultKey ? `<section class="paper match-result is-new"><span class="speech-eyebrow">${data.status === 'finished' ? 'GAME SET' : 'ROOM CLOSED'}</span><h2>${data.status === 'finished' ? `${escapeHtml(data.win_side === 'VILLAGER' ? '村人陣営' : data.win_side === 'WEREWOLF' ? '人狼陣営' : data.win_side || '')}の勝利！` : statusLabel(data.status)}</h2><p>${escapeHtml(data.abort_reason || 'テーブルの席を選んで役職を確認したり、履歴を読み返せます。')}</p><a class="btn" href="#/">新しい部屋へ</a></section>` : '';
+    if (resultKey && ui.mode === 'replay' && !document.hidden) $('#match-result')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
   ui.status = data.status;
+  updateReplayBar(ui, data);
+  if (replayable) {
+    // 終了試合を開いたら一度だけ自動再生する（ユーザーが一時停止した後は再開しない）。
+    if (!ui.replay.started && ui.pos < ui.total) {
+      ui.replay.started = true;
+      replayPlay(ui);
+    }
+  } else {
+    armLiveTicker(ui);
+  }
+}
+
+// フェーズや日付が変わったタイミングで、テーブル上に短い進行バナーを重ねる。
+function showPhaseBanner(ui, room) {
+  const banner = $('#phase-banner');
+  if (!banner) return;
+  const e = ui.viewEvents[ui.viewEvents.length - 1];
+  const phase = room.progress?.phase || '';
+  const day = room.day ?? e?.day ?? 0;
+  const key = `${phase}:${day}`;
+  if (ui.bannerKey === key) return;
+  ui.bannerKey = key;
+  const label = e?.type === 'game_start' || e?.type === 'day'
+    ? bannerText(e, day)
+    : (phase === 'day_discussion' ? `${day}日目 · 昼・議論` : phase === 'day_vote' ? '昼・投票' : phase === 'day_result' ? '昼・結果' : phase === 'night' ? '夜' : phase === 'finished' ? 'ゲーム終了' : '');
+  banner.textContent = label;
+  banner.classList.remove('show');
+  void banner.offsetWidth; // 連続したフェーズ切替でも毎回アニメーションを再生する
+  if (label) banner.classList.add('show');
+}
+
+// ---- ライブの適度な間 ----
+// SSEでまとめて届いたイベントをそのまま描画せず、短い間隔で順に流す。
+function armLiveTicker(ui) {
+  if (ui.mode !== 'live' || ui.pos >= ui.total || ui.liveTimer) return;
+  ui.liveTimer = setTimeout(() => {
+    ui.liveTimer = null;
+    if (!matchUI || matchUI !== ui || ui.mode !== 'live' || ui.pos >= ui.total) return;
+    ui.pos++;
+    renderMatch(state.room, true);
+  }, ui.pos === 0 ? 200 : 450);
+}
+
+// ---- 終了試合の再生 ----
+function replayStepAhead(ui) {
+  const prev = ui.timeline[ui.pos - 1];
+  const e = ui.timeline[ui.pos];
+  const phaseChanged = !!e && phaseAt(ui.timeline, ui.pos + 1) !== phaseAt(ui.timeline, ui.pos);
+  return replayDelayFor(prev, e, phaseChanged, ui.replay.speed);
+}
+
+function replaySeek(ui, pos, { autoplay = false } = {}) {
+  ui.mode = 'replay';
+  ui.pos = Math.max(0, Math.min(pos, ui.total));
+  clearTimeout(ui.liveTimer);
+  ui.liveTimer = null;
+  ui.replay.playing = false;
+  clearTimeout(ui.replayTimer);
+  ui.replayTimer = null;
+  if (autoplay && ui.pos < ui.total) replayPlay(ui);
+  else renderMatch(state.room, true);
+}
+
+function replayPlay(ui) {
+  ui.mode = 'replay';
+  if (ui.pos >= ui.total) ui.pos = 0;
+  if (ui.total === 0) { ui.replay.playing = false; renderMatch(state.room, true); return; }
+  ui.replay.playing = true;
+  clearTimeout(ui.replayTimer);
+  scheduleReplay(ui);
+  renderMatch(state.room, true);
+}
+
+function replayPause(ui) {
+  ui.replay.playing = false;
+  clearTimeout(ui.replayTimer);
+  ui.replayTimer = null;
+  renderMatch(state.room, true);
+}
+
+function scheduleReplay(ui) {
+  if (!ui.replay.playing || ui.pos >= ui.total) return;
+  ui.replayTimer = setTimeout(() => {
+    ui.replayTimer = null;
+    if (!matchUI || matchUI !== ui || !ui.replay.playing) return;
+    ui.pos++;
+    renderMatch(state.room, true);
+    scheduleReplay(ui);
+  }, replayStepAhead(ui));
+}
+
+// 再生バーは状態表示・スライダー位置だけ毎回同期し、DOMは初回に一度だけ作る。
+function updateReplayBar(ui, data) {
+  const slot = $('#replay-slot');
+  if (!slot) return;
+  if (!REPLAYABLE_STATUS.includes(data.status)) {
+    slot.innerHTML = '';
+    ui.replayBarKey = '';
+    return;
+  }
+  if (!ui.replayBarKey) {
+    ui.replayBarKey = 'bar';
+    slot.innerHTML = `<div class="replay-bar paper" aria-label="対戦記録の再生">
+      <div class="replay-status"><span class="replay-dot" aria-hidden="true"></span><span id="replay-label"></span></div>
+      <input type="range" id="replay-range" min="0" max="${ui.total}" value="0" step="1" aria-label="再生位置">
+      <div class="replay-controls">
+        <button class="btn btn--small" type="button" data-action="replay-toggle">▶ 再生</button>
+        <button class="btn btn--small" type="button" data-action="replay-restart">⏮ 最初から</button>
+        <button class="btn btn--small" type="button" data-action="replay-end">⏭ 最後へ</button>
+        <label class="replay-speed">速度 <select id="replay-speed" aria-label="再生速度">
+          <option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option>
+        </select></label>
+      </div></div>`;
+    slot.querySelector('#replay-range').addEventListener('input', e => replaySeek(ui, Number(e.target.value)));
+    slot.querySelector('#replay-speed').addEventListener('change', e => { ui.replay.speed = Number(e.target.value) || 1; });
+  }
+  const label = $('#replay-label');
+  const range = $('#replay-range');
+  const toggle = slot.querySelector('[data-action="replay-toggle"]');
+  const speed = $('#replay-speed');
+  if (range) {
+    range.max = ui.total;
+    if (document.activeElement !== range) range.value = ui.pos;
+  }
+  const done = ui.pos >= ui.total;
+  const playing = ui.replay.playing;
+  if (label) {
+    label.textContent = ui.mode === 'live' && !done
+      ? `対戦記録を再生しています ${ui.pos}/${ui.total}`
+      : done ? `再生完了 ${ui.total}/${ui.total}` : `対戦記録 ${ui.pos}/${ui.total}`;
+  }
+  slot.classList.toggle('is-playing', playing);
+  slot.classList.toggle('is-done', done);
+  if (toggle) toggle.textContent = playing ? '⏸ 一時停止' : done ? '↻ もう一度' : ui.pos > 0 ? '▶ 再開' : '▶ 再生';
+  if (speed && document.activeElement !== speed) speed.value = String(ui.replay.speed);
 }
 
 function renderCurrentSpeech() {
   const ui = matchUI;
-  const hasWhisper = state.events.some(e => e.type === 'whisper');
+  const events = ui.viewEvents || state.events;
+  const hasWhisper = events.some(e => e.type === 'whisper');
   if (!hasWhisper) ui.channel = 'talk';
-  const latest = state.events.findLast(e => e.type === ui.channel);
+  const latest = events.findLast(e => e.type === ui.channel);
   const key = JSON.stringify([latest, ui.channel, hasWhisper]);
   if (key === ui.speechKey) return;
+  const isNew = ui.speechKey !== '';
   ui.speechKey = key;
   const focus = document.activeElement?.dataset.action;
   $('#current-speech').innerHTML = `<section class="paper current-speech" aria-label="最新の発言"><div class="speech-heading"><span class="speech-number">${latest ? String(latest.from_idx).padStart(2, '0') : '…'}</span><div><span class="speech-eyebrow">${ui.channel === 'whisper' ? '人狼だけの会話' : 'LATEST TALK · 最新の公開発言'}</span><h2>${latest ? escapeHtml(seatNameOf(latest.from_idx)) : '最初の発言を待っています'}</h2></div></div><p class="speech-text">${escapeHtml(latest ? displayTalkText(latest.text) : 'AIたちの会話が始まると、ここに届きます。')}</p><div class="speech-actions"><span class="field-hint">${latest ? `${latest.day}日目` : '発言・投票はAIが行います'}</span><div>${hasWhisper ? `<button class="btn btn--small" data-action="channel">${ui.channel === 'talk' ? '人狼の囁きへ' : '公開会話へ'}</button> ` : ''}${latest ? `<button class="btn btn--small" data-action="full-speech" data-seq="${Number(latest.seq)}">全文を読む ↗</button>` : ''}</div></div></section>`;
   if (focus) [...$('#current-speech').querySelectorAll('[data-action]')].find(el => el.dataset.action === focus)?.focus({ preventScroll: true });
+  $('#current-speech .current-speech')?.classList.toggle('is-new', isNew);
 }
 
 function updateOwnerPanel(data) {
@@ -950,7 +1107,7 @@ function updateOwnerPanel(data) {
   }
   const log = $('#consult-log');
   if (log) {
-    const notes = state.events.filter(e => ['owner_advice', 'owner_note'].includes(e.type));
+    const notes = (ui.viewEvents || state.events).filter(e => ['owner_advice', 'owner_note'].includes(e.type));
     const key = JSON.stringify(notes);
     if (log.dataset.events !== key) {
       const follow = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
@@ -993,17 +1150,23 @@ function handleMatchClick(e) {
   } else if (action === 'channel') {
     matchUI.channel = matchUI.channel === 'talk' ? 'whisper' : 'talk';
     renderCurrentSpeech();
+  } else if (action === 'replay-toggle') {
+    if (matchUI.replay.playing) replayPause(matchUI); else replayPlay(matchUI);
+  } else if (action === 'replay-restart') {
+    replaySeek(matchUI, 0, { autoplay: true });
+  } else if (action === 'replay-end') {
+    replaySeek(matchUI, matchUI.total);
   }
 }
 
 function renderSeatDetail(id) {
-  const seat = state.room.seats.find(s => s.seat_id === id);
+  const seat = (matchUI?.viewRoom?.seats || state.room.seats).find(s => s.seat_id === id);
   if (!seat) return;
   $('.sheet-body', matchUI.sheet).innerHTML = `<div class="paper panel"><span class="speech-number">${String(seat.agent_idx).padStart(2, '0')}</span><h3>${escapeHtml(seatNameOf(seat.agent_idx))}</h3><p>${seat.is_mine ? 'あなたのAI · ' : ''}${seat.alive ? '生存' : '死亡'}</p><p>参加者：${escapeHtml(seat.user_name || '—')}</p><p>チーム：${escapeHtml(seat.team_name || '—')}</p><span class="own-role">${escapeHtml(roleLabel(seat.role))}</span></div>`;
 }
 
 function renderRoomMenu() {
-  const data = state.room;
+  const data = matchUI?.viewRoom || state.room;
   const key = JSON.stringify([data.name, data.seats, data.roles, data.connected]);
   if (matchUI.menuKey === key) return;
   matchUI.menuKey = key;
