@@ -45,6 +45,7 @@ const PHASE_LABEL = {
   starting: ['開始中', 'is-run', 'bot'],
   day_discussion: ['昼・議論', 'is-day', 'sun'],
   day_vote: ['昼・投票', 'is-day', 'sun'],
+  day_result: ['昼・結果', 'is-day', 'sun'],
   night: ['夜', 'is-night', 'moon'],
   finished: ['終了', 'is-end', 'flag'],
 };

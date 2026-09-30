@@ -97,3 +97,84 @@ body.tab-hidden *, body.connection-lost .tt-stage * { animation-play-state: paus
 .history-filter-panel summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .history-filters { margin-top: 10px; }
 .history-scroll { min-height: 140px; }
+
+/* ---------- フェーズの切替バナー ---------- */
+#phase-banner { display: grid; place-items: center; min-height: 0; pointer-events: none; }
+#phase-banner:empty::before { content: none; }
+#phase-banner.show {
+  padding: 4px 0;
+  font-weight: 900;
+  font-size: 1rem;
+  letter-spacing: .06em;
+  color: var(--ink, #3e2946);
+  animation: phase-banner-pop 2.4s ease-out both;
+}
+@keyframes phase-banner-pop {
+  0% { opacity: 0; transform: scale(.92) translateY(-4px); }
+  12% { opacity: 1; transform: none; }
+  78% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* ---------- 対戦記録の再生バー ---------- */
+.replay-bar {
+  display: grid;
+  gap: 10px;
+  padding: 12px 16px;
+}
+.replay-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: .82rem;
+  font-weight: 800;
+  color: var(--ink-muted, #716775);
+}
+.replay-dot {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--mint-edge, #6fc39c);
+}
+.replay-slot.is-playing .replay-dot { animation: replay-pulse 1.4s ease-in-out infinite; }
+.replay-slot.is-done .replay-dot { background: var(--yellow, #ffdfa0); }
+@keyframes replay-pulse {
+  0%, 100% { transform: scale(1); opacity: .6; }
+  50% { transform: scale(1.35); opacity: 1; }
+}
+#replay-range {
+  width: 100%;
+  accent-color: var(--tt-plum, #45335a);
+  cursor: pointer;
+}
+.replay-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.replay-controls .btn { min-height: 40px; }
+.replay-speed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: .8rem;
+  font-weight: 700;
+}
+.replay-speed select {
+  min-height: 36px;
+  padding: 2px 8px;
+  border: 1.5px solid var(--edge, #4c3554);
+  border-radius: 10px;
+  background: #fffdf8;
+  font: inherit;
+}
+
+/* 最新発言カードの到着アニメーション */
+.current-speech.is-new { animation: speech-arrive .3s ease-out; }
+@keyframes speech-arrive {
+  from { transform: translateY(6px); opacity: .55; }
+  to { transform: none; opacity: 1; }
+}
