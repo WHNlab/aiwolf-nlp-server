@@ -12,12 +12,13 @@ import subprocess
 import sys
 import threading
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 ACTIONS = {"TALK", "WHISPER", "VOTE", "DIVINE", "GUARD", "ATTACK"}
 TERMINAL = {"finished", "disconnected", "error"}
 DEFAULT_WAIT_SECONDS = 15
@@ -292,8 +293,9 @@ def main():
                 import websockets.sync.client  # noqa: F401
             except ImportError:
                 raise ValueError("先に python -m pip install -r requirements.txt を実行してください") from None
-            if not args.name.strip() or len(args.name) > 64 or any(c in args.name for c in "\r\n"):
-                raise ValueError("AI名は改行なしの1〜64文字にしてください")
+            args.name = args.name.strip()
+            if not args.name or len(args.name) > 6 or any(unicodedata.category(c) == "Cc" for c in args.name) or args.name in {"Over", "Skip", "None"}:
+                raise ValueError("Bot名（チーム名）は制御文字を含まない1〜6文字にしてください。Over・Skip・Noneは使用できません")
             invite = read(args.invite_file)
             validate_invite(invite)
             # 再実行で二重接続しない。試合ごとに新しい保存先を使う。

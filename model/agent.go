@@ -21,6 +21,7 @@ type Agent struct {
 	TeamName           string
 	OriginalName       string
 	GameName           string
+	BotName            string
 	Profile            *Profile
 	ProfileDescription *string
 	Role               Role
@@ -38,6 +39,7 @@ func applySeatContext(a *Agent, conn Connection) {
 	}
 	a.KeyPhrase = conn.Seat.KeyPhrase
 	a.OwnerInbox = conn.Seat.Inbox
+	a.BotName = conn.Seat.BotName
 }
 
 func NewAgent(idx int, role Role, conn Connection) *Agent {

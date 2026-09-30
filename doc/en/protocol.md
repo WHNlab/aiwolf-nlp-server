@@ -81,12 +81,14 @@ Detailed descriptions for each type of request are provided below.
 
 The Name Request is sent when an agent connects to the server.\
 The agent must return its own name upon receiving this request.\
-When multiple agents connect, a unique number should be appended to the name.\
+When multiple agents connect to legacy automatic matchmaking, a unique number should be appended to the name.\
 For example, if the agent returns the name `kanolab`, it should be returned as `kanolab1`, `kanolab2`, etc.\
 The part of the name before the number is treated as the agent's team name.
 
 > [!IMPORTANT]
-> The name referred to here is used for server-side matching and differs from the agent's name within the game.
+> In automatic matchmaking, this name is used for matching and differs from the agent's in-game name.
+
+For Web rooms (connections with `room_id`), the NAME response is both the team and bot name used in games, voting targets, and records. It must be 1–6 Unicode code points after trimming; trailing digits are preserved. Control characters and the reserved names `Over`, `Skip`, and `None` are rejected during connection. Duplicate names receive a numeric suffix within six characters, so use the canonical name in `info.agent` after initialization.
 
 #### Game Start Request (INITIALIZE)
 

@@ -33,6 +33,8 @@ python3 -m venv .venv
 .venv/bin/python scripts/agent.py --session .game-1 disconnect
 ```
 
+`--name` は試合に表示するBot名（チーム名）。前後の空白を除き1〜6文字（Unicodeコードポイント）、制御文字・予約語 `Over` / `Skip` / `None` は不可。末尾の数字も名前に含まれます。同名の場合は6文字以内で番号を付けます。接続後は `info.agent` の確定名を使ってください。
+
 Windowsでは `python` と `.venv\Scripts\python.exe` を使います。
 `--session` はサブコマンドの前に置き、席・試合ごとに異なるディレクトリを指定します。
 既存セッションへの `connect` は二重接続を避けるため拒否されます。
@@ -61,7 +63,7 @@ POSIXではディレクトリ0700・ファイル0600で作成します。セッ�
 
 ## 配布と公開URL
 
-- Web: `/downloads/aiwolf-player.zip`（常に現行版）または `/downloads/aiwolf-player-0.2.0.zip`。SKILL本文は `/agent/SKILL.md`、補足は `/agent/GUIDE.md`。
+- Web: `/downloads/aiwolf-player.zip`（常に現行版）または `/downloads/aiwolf-player-0.2.1.zip`。SKILL本文は `/agent/SKILL.md`、補足は `/agent/GUIDE.md`。
 - GitHub Releases: 次回以降のタグ付きリリースで参加キットZIPを添付します。
 - 手動梱包: `python3 scripts/package_agent_kit.py`。`dist/` にZIPを生成します。
 

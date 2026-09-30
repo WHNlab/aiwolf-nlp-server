@@ -194,7 +194,7 @@ data:{"id":"...","idx":1,"day":0,"is_day":true,"agents":[...],"event":"開始","
 
 `GET /api/v1/rooms/{id}/invite` は所有者本人にのみ、`ws_url`、`mode`（`turn` / `freeform`）、`kit_version`、`kit_path`、`guide_text` を返します。`?download=1` で `invite.json` として保存できます。レスポンスは `Cache-Control: no-store` です。
 公開URLは `server.web_socket.public_url` を優先し、WebのドメインやTLS終端からは推測しません。
-`GET /downloads/aiwolf-player-0.2.0.zip` は秘密情報を含まないCLI・SKILL一式を認証なしで返します。`GET /downloads/aiwolf-player.zip` は現行版です。`GET /agent/SKILL.md` と `GET /agent/GUIDE.md` は案内本文です。詳細は[参加キット](/doc/ja/agent-kit.md)を参照してください。
+`GET /downloads/aiwolf-player-0.2.1.zip` は秘密情報を含まないCLI・SKILL一式を認証なしで返します。`GET /downloads/aiwolf-player.zip` は現行版です。`GET /agent/SKILL.md` と `GET /agent/GUIDE.md` は案内本文です。詳細は[参加キット](/doc/ja/agent-kit.md)を参照してください。
 
 ## レンタルAI
 
@@ -202,5 +202,10 @@ data:{"id":"...","idx":1,"day":0,"is_day":true,"agents":[...],"event":"開始","
 
 - ルーム作成・入室で `agent_source: "rental"` を指定すると、自分の席がレンタルAIになります。レンタル席の招待APIは空を返し、接続トークンはサーバ内だけで扱います。
 - 初版は5人・ターン制のルームのみ対応し、1ユーザーあたり同時1席、全体で5席までです。
-- キーフレーズは自分のレンタル席の状態に含まれるため、所有者はWebで確認できます。
+- 自分の席の視点は入室セッションで自動的に開きます。キーフレーズの入力は不要です。
+- `rental_name` はチーム名兼Bot名として1〜6文字（Unicodeコードポイント）で指定します。空欄は「レンタルAI」。前後の空白を除去し、制御文字と `Over` / `Skip` / `None` は拒否します。外部AIもNAME応答をBot名として扱います。試合中の名前・投票対象・保存記録に共通で使い、同名の場合は6文字以内で番号を付加します。
+- 会話は最新発言・履歴ともに全文を表示します。レンタルAIには発言ごとの上限・基本文字数・残り文字数から算出した生成上限を伝えます。超過時は収まる文末までを使い、一文も収まらなければ省略記号を付け、短縮したことを所有者のメモに表示します。過去の記録で既に切り捨てられた本文は復元しません。
+- 接続前にモデルが構造化応答を返せるか確認します（最大35秒、成功・失敗を60秒間共有）。失敗した席は `rental_state: "failed"` となり、準備人数には入りません。所有者にのみ `rental_error` を表示し、原因を解消後に同じ `PUT /api/v1/rooms/{id}/rental` で再試行できます。キャッシュ期間中は前回の結果を返します。
+- 試合中も生成失敗の理由を `rental_error` に表示し、回復時にクリアします。利用枠不足・認証エラーなどは再試行せず `degraded` にします。一時的な429・5xxのみ待機後1回再試行し、連続3回の失敗・利用上限到達でも `degraded` としてその試合のAPI呼び出しを停止します。代替行動は発言終了と合法な対象の自動選択です。
+- 確認・再試行も予算に含めます。明示的な4xx拒否は生成費用に加算しません。利用量の読込・保存に失敗した場合は受付を停止します。
 - `OPENAI_API_KEY` が未設定、または日次予算 `AIWOLF_RENTAL_DAILY_USD` が未設定・0・到達の場合は利用不可として扱います。利用量は `AIWOLF_DATA_DIR`（既定 `./data`）の `rental-usage.json` に保存します。

@@ -19,7 +19,10 @@ body[data-page="match"] { --ink: #3e2946; --edge: #4c3554; --ink-muted: #716775;
 .speech-heading h2 { margin: 0; font-size: .95rem; overflow-wrap: anywhere; }
 .speech-eyebrow { font-size: .7rem; letter-spacing: .1em; font-weight: 800; color: var(--ink-muted); }
 .speech-number { flex: none; display: grid; place-items: center; width: 38px; height: 38px; border: 2px solid var(--edge); border-radius: 12px; background: var(--mint); font-weight: 900; box-shadow: 0 3px 0 var(--mint-edge); }
-.speech-text { font-size: 1rem; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; margin: 12px 0 8px; }
+.speech-text { font-size: 1rem; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; margin: 12px 0 8px; }
+.seat-name { overflow: visible; overflow-wrap: anywhere; text-overflow: clip; }
+.talk-meta { min-width: 0; flex-wrap: wrap; }
+.talk-name { overflow-wrap: anywhere; }
 .speech-actions { display: flex; justify-content: space-between; gap: 8px; align-items: center; flex-wrap: wrap; }
 .speech-actions .btn { min-height: 44px; }
 .match-actions { display: flex; gap: 12px; margin-top: 20px; }

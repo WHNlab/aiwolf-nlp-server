@@ -5,8 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
+	"math"
+	"math/rand/v2"
 	"net/http"
 	"strconv"
 	"strings"
@@ -45,6 +46,7 @@ type genOutput struct {
 }
 
 type usage struct {
+	Known        bool  `json:"-"`
 	InputTokens  int64 `json:"input_tokens"`
 	OutputTokens int64 `json:"output_tokens"`
 	TotalTokens  int64 `json:"total_tokens"`
@@ -84,9 +86,6 @@ func schemaFor(request string, candidates []string) jsonSchema {
 		}
 	default:
 		enum := append([]string{}, candidates...)
-		if request == "ATTACK" {
-			enum = append(enum, "None")
-		}
 		return jsonSchema{
 			Name:   "wolf_target",
 			Strict: true,
@@ -143,7 +142,7 @@ type responsesResponse struct {
 	IncompleteDetails *struct {
 		Reason string `json:"reason"`
 	} `json:"incomplete_details"`
-	Usage  usage `json:"usage"`
+	Usage  *usage `json:"usage"`
 	Output []struct {
 		Type    string `json:"type"`
 		Content []struct {
@@ -160,8 +159,8 @@ type responsesResponse struct {
 // extractText はoutput_textまたはoutput配列からテキストを取り出す。
 // refusalのみの出力はエラー扱いする。
 func (r *responsesResponse) extractText() (string, error) {
-	if r.Error != nil && r.Error.Message != "" {
-		return "", fmt.Errorf("APIエラー: %s", r.Error.Code)
+	if r.Error != nil || (r.Status != "" && r.Status != "completed") {
+		return "", errors.New("AIの生成が完了しませんでした")
 	}
 	if r.OutputText != "" {
 		return r.OutputText, nil
@@ -171,152 +170,158 @@ func (r *responsesResponse) extractText() (string, error) {
 			if c.Type == "output_text" && c.Text != "" {
 				return c.Text, nil
 			}
-			if c.Type == "refusal" && c.Text != "" {
+			if c.Type == "refusal" {
 				return "", errors.New("モデルが応答を拒否しました")
 			}
 		}
 	}
-	if r.Status == "incomplete" {
-		reason := "unknown"
-		if r.IncompleteDetails != nil {
-			reason = r.IncompleteDetails.Reason
-		}
-		return "", fmt.Errorf("出力が途中で打ち切られました: %s", reason)
-	}
 	return "", errors.New("応答テキストが空です")
 }
 
-// generate は1回の行動生成を行う。deadlineはゲームのaction期限で、
-// その3秒前までに応答が返らなければ諦める。429/5xxのみ1回だけ再試行する。
-func (c *openAIClient) generate(ctx context.Context, input []reqMessage, schema jsonSchema, deadline time.Time) (*genOutput, usage, error) {
-	var u usage
-	if c == nil {
-		return nil, u, errors.New("レンタルAIが無効です")
-	}
-	// ゲームの期限に触れないよう安全側の締切を設ける。
-	apiDeadline := deadline.Add(-actionSafetyMargin)
-	if remain := time.Until(apiDeadline); remain <= 0 {
-		return nil, u, errors.New("応答期限が残っていません")
-	} else if remain < apiCallTimeout {
-		// 残りが短いときはゲームの期限に合わせる。
-		apiDeadline = time.Now().Add(remain)
-	} else {
-		apiDeadline = time.Now().Add(apiCallTimeout)
-	}
+// reserveCall は送信ごとに予算を確保し、応答後の精算関数を返す。
+type reserveCall func() (func(usage), error)
 
+// generate はゲームの期限と35秒の上限内で生成する。一時的な429/5xxだけ1回再試行する。
+func (c *openAIClient) generate(ctx context.Context, input []reqMessage, schema jsonSchema, deadline time.Time, reserve reserveCall) (*genOutput, error) {
+	if c == nil {
+		return nil, errors.New("レンタルAIが無効です")
+	}
+	apiDeadline := deadline.Add(-actionSafetyMargin)
+	if cap := time.Now().Add(35 * time.Second); cap.Before(apiDeadline) {
+		apiDeadline = cap
+	}
+	ctx, cancel := context.WithDeadline(ctx, apiDeadline)
+	defer cancel()
 	body := responsesRequest{
-		Model:           modelName,
-		Store:           false,
-		MaxOutputTokens: maxOutputTokens,
-		Reasoning:       reasoningReq{Effort: "low"},
-		Input:           input,
-		Text: textFormat{Format: formatDef{
-			Type:   "json_schema",
-			Name:   schema.Name,
-			Strict: schema.Strict,
-			Schema: schema.Schema,
-		}},
+		Model: modelName, Store: false, MaxOutputTokens: maxOutputTokens,
+		Reasoning: reasoningReq{Effort: "low"}, Input: input,
+		Text: textFormat{Format: formatDef{Type: "json_schema", Name: schema.Name, Strict: schema.Strict, Schema: schema.Schema}},
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
-		return nil, u, err
+		return nil, errors.New("AIへの要求を作成できませんでした")
 	}
-
-	var lastErr error
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		if time.Until(apiDeadline) <= 0 {
-			return nil, u, errors.New("応答期限に間に合いませんでした")
+	for attempt := 0; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
-		reqCtx, cancel := context.WithDeadline(ctx, apiDeadline)
-		req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, responsesURL, bytes.NewReader(raw))
+		settle, err := reserve()
 		if err != nil {
-			cancel()
-			return nil, u, err
+			return nil, err
 		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
-
-		resp, err := c.http.Do(req)
-		if err != nil {
-			cancel()
-			if reqCtx.Err() != nil || ctx.Err() != nil {
-				return nil, u, errors.New("応答期限に間に合いませんでした")
-			}
-			lastErr = err
-			break
-		}
-		data, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		retryAfter := resp.Header.Get("Retry-After")
-		status := resp.StatusCode
-		resp.Body.Close()
-		cancel()
-		if readErr != nil {
-			lastErr = readErr
-			break
-		}
-		if status == http.StatusOK {
-			var out responsesResponse
-			if err := json.Unmarshal(data, &out); err != nil {
-				return nil, u, fmt.Errorf("応答の解析に失敗しました: %w", err)
-			}
-			u = out.Usage
+		out, u, retryAfter, err := c.request(ctx, raw)
+		settle(u)
+		if err == nil {
 			text, err := out.extractText()
 			if err != nil {
-				return nil, u, err
+				return nil, err
 			}
-			return parseOutput(text, schema), u, nil
-		}
-		// 認証系・4xxは再試行しない。429/5xxだけ1回まで。
-		if status == http.StatusUnauthorized || status == http.StatusForbidden {
-			return nil, u, fmt.Errorf("APIキーが無効です(%d)", status)
-		}
-		retryable := status == http.StatusTooManyRequests || status >= 500
-		lastErr = fmt.Errorf("OpenAI APIが%dを返しました", status)
-		if !retryable || attempt >= maxRetries {
-			break
-		}
-		if wait := parseRetryAfter(retryAfter); wait > 0 {
-			if wait > time.Until(apiDeadline) {
-				break
+			parsed := parseOutput(text, schema)
+			if parsed == nil {
+				return nil, errors.New("AIの応答形式が不正です")
 			}
-			select {
-			case <-ctx.Done():
-				return nil, u, ctx.Err()
-			case <-time.After(wait):
-			}
+			return parsed, nil
+		}
+		var apiErr *APIError
+		if !errors.As(err, &apiErr) || !apiErr.retryable() || attempt >= maxRetries {
+			return nil, err
+		}
+		wait := parseRetryAfter(retryAfter)
+		if wait <= 0 {
+			wait = time.Second + time.Duration(rand.IntN(250))*time.Millisecond
+		}
+		// 待機後に送信する余裕がなければ、追加の課金を始めない。
+		if wait+time.Second >= time.Until(apiDeadline) {
+			return nil, err
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
 		}
 	}
-	return nil, u, lastErr
+}
+
+func (c *openAIClient) request(ctx context.Context, raw []byte) (*responsesResponse, usage, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, apiCallTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, responsesURL, bytes.NewReader(raw))
+	if err != nil {
+		return nil, usage{}, "", errors.New("AIへの要求を作成できませんでした")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, usage{}, "", ctx.Err()
+		}
+		return nil, usage{}, "", errors.New("AI提供元へ接続できませんでした")
+	}
+	defer resp.Body.Close()
+	data, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusOK {
+		// 明示的に拒否された4xxは生成費用に数えない。通信断などの不明分は予約額を維持する。
+		u := usage{Known: resp.StatusCode >= 400 && resp.StatusCode < 500}
+		return nil, u, resp.Header.Get("Retry-After"), classifyAPIError(resp.StatusCode, data)
+	}
+	if readErr != nil {
+		return nil, usage{}, "", errors.New("AIの応答を読み取れませんでした")
+	}
+	var out responsesResponse
+	if json.Unmarshal(data, &out) != nil {
+		return nil, usage{}, "", errors.New("AIの応答を解析できませんでした")
+	}
+	u := usage{}
+	if out.Usage != nil {
+		u = *out.Usage
+		u.Known = true
+	}
+	return &out, u, "", nil
 }
 
 func parseRetryAfter(v string) time.Duration {
-	if v == "" {
-		return 0
+	if secs, err := strconv.ParseFloat(v, 64); err == nil && secs >= 0 && !math.IsNaN(secs) && !math.IsInf(secs, 0) {
+		return time.Duration(math.Min(secs, 86400) * float64(time.Second))
 	}
-	if secs, err := strconv.Atoi(v); err == nil && secs >= 0 {
-		return time.Duration(secs) * time.Second
+	if until, err := http.ParseTime(v); err == nil {
+		return time.Until(until)
 	}
 	return 0
 }
 
-// parseOutput は構造化出力のJSONを genOutput へ写す。
+// parseOutput は必須キー・型・対象候補を検証し、不正な出力を成功として扱わない。
 func parseOutput(text string, schema jsonSchema) *genOutput {
 	var m map[string]any
-	if json.Unmarshal([]byte(text), &m) != nil {
+	if json.Unmarshal([]byte(text), &m) != nil || len(m) != 2 {
 		return nil
 	}
-	out := &genOutput{}
-	if v, ok := m["note"].(string); ok {
-		out.note = v
+	note, ok := m["note"].(string)
+	if !ok {
+		return nil
 	}
-	if v, ok := m["speech"].(string); ok {
+	out := &genOutput{note: note}
+	if schema.Name == "wolf_speech" {
+		v, ok := m["speech"].(string)
+		if !ok || strings.TrimSpace(v) == "" {
+			return nil
+		}
 		out.speech = strings.TrimSpace(v)
+		return out
 	}
-	if v, ok := m["target"].(string); ok {
-		out.target = strings.TrimSpace(v)
-	}
-	if out.speech == "" && out.target == "" {
+	target, ok := m["target"].(string)
+	if !ok {
 		return nil
 	}
-	return out
+	props := schema.Schema["properties"].(map[string]any)
+	candidates := props["target"].(map[string]any)["enum"].([]string)
+	for _, candidate := range candidates {
+		if target == candidate {
+			out.target = target
+			return out
+		}
+	}
+	return nil
 }

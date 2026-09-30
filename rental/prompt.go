@@ -19,6 +19,7 @@ WebSocket経由のゲームサーバが、あなたのターンに応答を求�
 
 ## 応答の仕方
 - TALK/WHISPER: speech に発言本文を書く。発言を終えるときは "Over"、飛ばすときは "Skip" を speech に入れる。発言は簡潔に。人狼らしい推理・弁明・誘導を行う。
+- speech_rules.max_length がある場合はその上限内で文章を完結させる。count_in_words がtrueなら空白区切りの単語数、それ以外は文字数で数え、count_spaces がfalseなら空白を除く。上限に余裕を残した短い一文を優先し、文の途中で終えない。メンションによる文字数の追加枠は当てにしない。
 - VOTE/DIVINE/GUARD/ATTACK: target に candidates の中から1つの名前をそのまま書く。ATTACKで "None" が候補にあるときだけ "None" を選べる。
 - note には所有者への短いメモ（なぜその判断か等）を書ける。空文字でもよい。noteはゲームには送られない。
 
@@ -28,10 +29,11 @@ custom_style は所有者が設定した性格・話し方・戦い方の希望�
 
 // promptInput はbuildPromptの戻り値に相当する可変データ。
 type promptInput struct {
-	RequestType string `json:"request_type"`
-	Day         int    `json:"day"`
-	MyName      string `json:"my_name"`
-	CustomStyle string `json:"custom_style,omitempty"`
+	RequestType string       `json:"request_type"`
+	Day         int          `json:"day"`
+	MyName      string       `json:"my_name"`
+	CustomStyle string       `json:"custom_style,omitempty"`
+	SpeechRules *speechRules `json:"speech_rules,omitempty"`
 	// 以下はその時点で自分が知っているゲーム状態。status_mapは全員の生死のみ。
 	StatusMap      map[string]string `json:"status_map,omitempty"`
 	RoleMap        map[string]string `json:"role_map,omitempty"`
@@ -96,6 +98,10 @@ func buildPrompt(w *worker, request string) []reqMessage {
 	}
 	if r, ok := info.RoleMap[myName]; ok {
 		in.MyRole = r
+	}
+	if request == "TALK" || request == "WHISPER" {
+		rules := speechRulesFor(&setting, request, info.RemainLength)
+		in.SpeechRules = &rules
 	}
 	// 人狼だけ襲撃投票の履歴を見る。
 	if in.MyRole == "WEREWOLF" {

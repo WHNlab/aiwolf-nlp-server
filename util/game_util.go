@@ -1,6 +1,7 @@
 package util
 
 import (
+	"fmt"
 	"maps"
 	"math/rand/v2"
 	"slices"
@@ -64,6 +65,7 @@ func CreateAgents(conns []model.Connection, roles map[model.Role]int) []*model.A
 		agent := model.NewAgent(i+1, role, conn)
 		agents = append(agents, agent)
 	}
+	applyUniqueBotNames(agents)
 	return agents
 }
 
@@ -82,6 +84,7 @@ func CreateAgentsWithProfiles(conns []model.Connection, roles map[model.Role]int
 		agent := model.NewAgentWithProfile(i+1, role, conn, profilesCopy[i], encoding)
 		agents = append(agents, agent)
 	}
+	applyUniqueBotNames(agents)
 	return agents
 }
 
@@ -95,7 +98,45 @@ func CreateAgentsWithRole(roleMapConns map[model.Role][]model.Connection) []*mod
 			agents = append(agents, agent)
 		}
 	}
+	applyUniqueBotNames(agents)
 	return agents
+}
+
+// applyUniqueBotNames はプロフィール名との衝突を避け、Web席のBot名をゲーム全体で一意にする。
+func applyUniqueBotNames(agents []*model.Agent) {
+	used := make(map[string]bool, len(agents))
+	for _, a := range agents {
+		if a.BotName != "" {
+			continue
+		}
+		used[a.GameName] = true
+	}
+	for _, a := range agents {
+		if a.BotName == "" {
+			continue
+		}
+		name := a.BotName
+		if used[name] {
+			suffix := fmt.Sprintf("-%d", a.Idx)
+			base := []rune(name)
+			limit := model.MaxBotNameLength - len([]rune(suffix))
+			if len(base) > limit {
+				base = base[:limit]
+			}
+			name = string(base) + suffix
+		}
+		for n := 2; used[name]; n++ {
+			suffix := fmt.Sprintf("-%d-%d", a.Idx, n)
+			base := []rune(a.BotName)
+			limit := model.MaxBotNameLength - len([]rune(suffix))
+			if len(base) > limit {
+				base = base[:limit]
+			}
+			name = string(base) + suffix
+		}
+		a.GameName = name
+		used[name] = true
+	}
 }
 
 func CreateAgentsWithRoleAndProfile(roleMapConns map[model.Role][]model.Connection, profiles []model.Profile, encoding map[string]string) []*model.Agent {
@@ -114,6 +155,7 @@ func CreateAgentsWithRoleAndProfile(roleMapConns map[model.Role][]model.Connecti
 			agents = append(agents, agent)
 		}
 	}
+	applyUniqueBotNames(agents)
 	return agents
 }
 

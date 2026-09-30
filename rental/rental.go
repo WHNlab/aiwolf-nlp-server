@@ -9,6 +9,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/aiwolfdial/aiwolf-nlp-server/model"
 	"github.com/aiwolfdial/aiwolf-nlp-server/room"
@@ -34,8 +35,12 @@ type Manager struct {
 	client *openAIClient
 	budget *Budget
 
-	mu      sync.Mutex
-	workers map[*room.Seat]*worker
+	mu         sync.Mutex
+	workers    map[*room.Seat]*worker
+	checkMu    sync.Mutex
+	checking   chan struct{}
+	checkUntil time.Time
+	checkErr   error
 }
 
 // NewManager は環境変数から設定を読み、利用可否を判定する。
@@ -51,6 +56,7 @@ func NewManager(cfg model.Config, apiKey string, dataDir string) *Manager {
 	if err != nil {
 		slog.Error("レンタル利用量の読み込みに失敗しました", "error", err)
 		budget = NewBudgetInMemory()
+		budget.failed = true
 	}
 	m := &Manager{
 		wsURL:   wsURL,
@@ -89,18 +95,20 @@ func (m *Manager) Available() (bool, string) {
 // Attach は席へ内部ワーカーを接続する。接続の成否はonStateで非同期に報告する。
 func (m *Manager) Attach(r *room.Room, seat *room.Seat, name, skill string, onState func(state, msg string)) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.client == nil || len(m.workers) >= maxWorkers {
+	old := m.workers[seat]
+	if m.client == nil || old == nil && len(m.workers) >= maxWorkers {
+		m.mu.Unlock()
 		if m.client == nil {
 			return ErrUnavailable
 		}
 		return ErrNoWorkers
 	}
-	if old := m.workers[seat]; old != nil {
-		old.stop()
-	}
 	w := newWorker(m, r, seat, name, skill, seat.InternalToken, onState)
 	m.workers[seat] = w
+	m.mu.Unlock()
+	if old != nil {
+		old.stop()
+	}
 	go w.run()
 	return nil
 }

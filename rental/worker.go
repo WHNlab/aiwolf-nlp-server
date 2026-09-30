@@ -3,6 +3,7 @@ package rental
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"math/rand"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aiwolfdial/aiwolf-nlp-server/model"
 	"github.com/aiwolfdial/aiwolf-nlp-server/room"
 	"github.com/gorilla/websocket"
 )
@@ -70,13 +72,7 @@ type settingIn struct {
 	} `json:"attack_vote"`
 }
 
-type talkSettingIn struct {
-	Duration  *int64 `json:"duration"`
-	MaxLength struct {
-		PerTalk  int `json:"per_talk"`
-		PerAgent int `json:"per_agent"`
-	} `json:"max_length"`
-}
+type talkSettingIn = model.TalkSetting
 
 type talkIn struct {
 	Day   int    `json:"day"`
@@ -113,10 +109,11 @@ type worker struct {
 	skill   string
 	onState func(state, msg string)
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	conn   *websocket.Conn
-	token  string // 接続時に確定した内部トークン。再Attachと区別する
+	ctx       context.Context
+	cancel    context.CancelFunc
+	conn      *websocket.Conn
+	token     string // 接続時に確定した内部トークン。再Attachと区別する
+	seatToken string
 
 	mu       sync.Mutex
 	started  bool // INITIALIZE を受けて試合が始まった
@@ -144,7 +141,7 @@ func newWorker(m *Manager, r *room.Room, seat *room.Seat, name, skill, token str
 	}
 	return &worker{
 		mgr: m, room: r, seat: seat, name: name, skill: skill,
-		token: token, onState: onState, ctx: ctx, cancel: cancel,
+		token: token, seatToken: seat.Token, onState: onState, ctx: ctx, cancel: cancel,
 	}
 }
 
@@ -177,11 +174,18 @@ func (w *worker) dialURL() string {
 	if strings.Contains(w.mgr.wsURL, "?") {
 		sep = "&"
 	}
-	return w.mgr.wsURL + sep + "room_id=" + w.room.ID + "&seat_token=" + w.seat.Token
+	return w.mgr.wsURL + sep + "room_id=" + w.room.ID + "&seat_token=" + w.seatToken
 }
 
 func (w *worker) run() {
 	defer w.mgr.removeWorker(w.seat, w)
+	if err := w.mgr.preflight(w.ctx, w.room.ID); err != nil {
+		if w.ctx.Err() == nil {
+			slog.Warn("レンタルAIの応答確認に失敗しました", "room", w.room.ID, "error", err)
+			w.setState("failed", rentalErrorMessage(err))
+		}
+		return
+	}
 	header := http.Header{}
 	header.Set("X-Rental-Token", w.token)
 	dialer := websocket.Dialer{HandshakeTimeout: dialTimeout}
@@ -198,8 +202,12 @@ func (w *worker) run() {
 	}
 	w.mu.Lock()
 	w.conn = conn
+	canceled := w.ctx.Err() != nil
 	w.mu.Unlock()
 	defer conn.Close()
+	if canceled {
+		return
+	}
 
 	for {
 		_, data, err := conn.ReadMessage()
@@ -317,50 +325,63 @@ func (w *worker) act(request string) {
 	w.mu.Lock()
 	setting := w.setting
 	degraded := w.degraded
-	calls := w.calls
+	remainSkip := w.info.RemainSkip
+	remainLength := w.info.RemainLength
 	w.mu.Unlock()
 
 	actionMs := setting.Timeout.Action
 	if actionMs <= 0 {
-		actionMs = 30000 // 設定未到着時の保守的な既定値
+		actionMs = 30000
 	}
 	deadline := time.Now().Add(time.Duration(actionMs) * time.Millisecond)
-	underMatchCap := w.mgr.budget.MatchSpend(w.room.ID) < w.mgr.budget.MatchCap()
-	canCall := !degraded && calls < maxCallsPerSeat && underMatchCap
-	reserved := false
-	if canCall {
-		reserved = w.mgr.budget.TryReserve()
-	}
-	if !degraded && calls > 0 && (!canCall || !reserved) {
-		// これまで呼び出せていたのに止まった=上限到達。1回だけ所有者へ知らせる。
+	if !degraded {
+		err := w.mgr.providerError()
+		var out *genOutput
+		if err == nil {
+			candidates := w.targets(request)
+			if request == "ATTACK" && setting.AttackVote.AllowNoTarget {
+				candidates = append(candidates, "None")
+			}
+			out, err = w.mgr.client.generate(w.ctx, buildPrompt(w, request), schemaFor(request, candidates), deadline, w.reserveCall)
+		}
+		if w.ctx.Err() != nil {
+			return
+		}
 		w.mu.Lock()
-		w.degraded = true
-		w.mu.Unlock()
-		w.setState("degraded", "レンタルAIの利用上限に達したため、以後は自動の代替行動に切り替わりました")
-	}
-	if canCall && reserved {
-		out, usage, err := w.mgr.client.generate(w.ctx, buildPrompt(w, request), schemaFor(request, w.targets(request)), deadline)
-		w.mgr.budget.Settle(usage, w.room.ID)
-		w.mu.Lock()
-		w.calls++
 		if err != nil {
 			w.failures++
-			if w.failures >= maxConsecFailures {
-				w.degraded = true
-				w.setState("degraded", "AIが応答できなかったため、今回の試合では自動の代替行動に切り替えました")
-			}
+			var apiErr *APIError
+			w.degraded = errors.Is(err, errBudget) || errors.As(err, &apiErr) && apiErr.permanent() || w.failures >= maxConsecFailures
 		} else {
 			w.failures = 0
 		}
+		degraded = w.degraded
 		w.mu.Unlock()
-		if err == nil && out != nil {
+		// 所有者通知はロックの外で行い、再接続・退室と競合しても停止しないようにする。
+		if err == nil {
+			w.setState("playing", "")
 			if request == "TALK" || request == "WHISPER" {
-				w.sendResponse(validSpeech(out.speech, &setting, request, w.info.RemainSkip), validNote(out.note))
+				speech := validSpeech(out.speech, speechRulesFor(&setting, request, remainLength), remainSkip)
+				note := out.note
+				if speech != strings.TrimSpace(out.speech) && speech != "Over" {
+					note = "発言が長かったため、文字数上限に合わせて短くしました。 " + note
+				}
+				w.sendResponse(speech, validNote(note))
 			} else {
 				w.sendResponse(validTarget(out.target, w.targets(request), request, &setting), validNote(out.note))
 			}
 			return
 		}
+		w.mgr.recordProviderError(err)
+		msg := rentalErrorMessage(err)
+		state := "playing"
+		if degraded {
+			state = "degraded"
+			msg += " この試合では発言を終了し、対象選択は自動の代替行動で進めます。"
+		} else {
+			msg += " 今回の行動は代替し、次の要求で再度応答を試みます。"
+		}
+		w.setState(state, msg)
 		slog.Warn("レンタルAIの生成に失敗しました", "room", w.room.ID, "request", request, "error", err)
 	}
 
@@ -375,6 +396,21 @@ func (w *worker) act(request string) {
 		return
 	}
 	w.send(cands[rand.Intn(len(cands))])
+}
+
+// reserveCall は再試行も含めて席ごとの回数と共有予算を消費する。
+func (w *worker) reserveCall() (func(usage), error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.calls >= maxCallsPerSeat {
+		return nil, errBudget
+	}
+	settle, err := w.mgr.budget.Reserve(w.room.ID)
+	if err != nil {
+		return nil, err
+	}
+	w.calls++
+	return settle, nil
 }
 
 // targets は要求種別に応じた合法な対象候補を返す。infoのstatus_mapから生存者を取る。
@@ -426,31 +462,6 @@ func agentName(raw json.RawMessage) string {
 		return s
 	}
 	return ""
-}
-
-// validSpeech は発言をゲームの制約に合わせて整形する。
-// remainSkip が0なら Skip を Over へ丸める（残りスキップ枠を使い切っているため）。
-func validSpeech(s string, setting *settingIn, request string, remainSkip *int) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return "Over"
-	}
-	if s == "Skip" && remainSkip != nil && *remainSkip <= 0 {
-		return "Over"
-	}
-	limit := 200
-	ts := setting.Talk
-	if request == "WHISPER" {
-		ts = setting.Whisper
-	}
-	if ts.MaxLength.PerTalk > 0 && ts.MaxLength.PerTalk < limit {
-		limit = ts.MaxLength.PerTalk
-	}
-	runes := []rune(s)
-	if len(runes) > limit {
-		s = string(runes[:limit])
-	}
-	return s
 }
 
 // validTarget は対象選択を合法な候補に丸める。enumに無い値は候補から選び直す。
