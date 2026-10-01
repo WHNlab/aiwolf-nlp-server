@@ -162,6 +162,12 @@ body::before {
 
 /* レンタルAI設定 */
 .rental-fields { border: 2px dashed var(--paper-edge); border-radius: var(--radius-control); padding: 12px 14px; margin-top: 10px; }
+.rental-agent-list { display: grid; gap: 12px; margin: 12px 0; }
+.rental-agent-card, .rental-managed-seat { min-width: 0; padding: 14px; border: 1px solid var(--paper-edge); border-radius: var(--radius-control); background: var(--paper); }
+.rental-agent-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.rental-agent-card .field:last-child { margin-bottom: 0; }
+.rental-managed-seat { margin: 12px 0; }
+.rental-managed-seat .field-hint { overflow-wrap: anywhere; }
 .field-hint-inline { font-weight: 500; font-size: 0.75rem; color: var(--ink-muted); }
 .skill-footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
 .skill-examples { display: flex; gap: 6px; flex-wrap: wrap; }

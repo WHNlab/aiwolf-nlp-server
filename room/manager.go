@@ -64,14 +64,20 @@ func (m *Manager) rentalDriver() RentalDriver {
 func (m *Manager) RentalCapabilities() map[string]any {
 	d := m.rentalDriver()
 	ok, reason := false, "レンタルAIは現在利用できません"
+	slots := 0
 	if d != nil {
 		ok, reason = d.Available()
+		if capacity, hasCapacity := d.(interface{ AvailableSlots() int }); hasCapacity && ok {
+			slots = capacity.AvailableSlots()
+		}
 	}
 	if m.base.Game.Talk.Duration != nil || m.base.Game.Whisper.Duration != nil {
 		ok, reason = false, "ターン制のルームのみレンタルAIに対応しています"
+		slots = 0
 	}
 	return map[string]any{
 		"available":        ok,
+		"available_slots":  slots,
 		"reason":           reason,
 		"max_skill_length": 200,
 		"supported_counts": []int{5},
@@ -123,14 +129,21 @@ func (m *Manager) Session(token string) *Session {
 // ---- 部屋 ----
 
 type CreateParams struct {
-	RoomName    string
-	UserName    string
-	AgentCount  int
-	Mode        string // "participate" or "spectate"
-	Public      bool
-	AgentSource string // "external"（既定）または "rental"
-	RentalName  string
-	RentalSkill string
+	RoomName     string
+	UserName     string
+	AgentCount   int
+	Mode         string // "participate" or "spectate"
+	Public       bool
+	AgentSource  string // "external"（既定）または "rental"
+	RentalName   string
+	RentalSkill  string
+	RentalAgents []RentalAgent
+}
+
+// RentalAgent はルーム作成時にまとめて確保するレンタルAIの設定。
+type RentalAgent struct {
+	Name  string `json:"name"`
+	Skill string `json:"skill"`
 }
 
 // normalizeRentalProfile は入力を検証し、補正済みの値を返す。UTF-8と制御文字を確認する。
@@ -208,7 +221,7 @@ func (m *Manager) CreateRoom(sess *Session, p CreateParams) (*Room, error) {
 	m.mu.Unlock()
 
 	// レンタル可否の確認はr.mu取得前に行う（m.muとのロック順を守るため）。
-	// rentalMuは確認→席確保→Attachまで保持し、同時1席制限の競合を防ぐ。
+	// rentalMuは確認→席確保→Attachまで保持し、同時利用枠の競合を防ぐ。
 	// r.Configとr.AgentCntは生成時に確定し以後変わらない。
 	if p.AgentSource == "rental" {
 		m.rentalMu.Lock()
@@ -222,18 +235,43 @@ func (m *Manager) CreateRoom(sess *Session, p CreateParams) (*Room, error) {
 	}
 	switch p.AgentSource {
 	case "", "external":
-	case "rental":
-		if _, _, err := normalizeRentalProfile(p.RentalName, p.RentalSkill); err != nil {
+		if len(p.RentalAgents) != 0 {
 			m.mu.Lock()
 			delete(m.rooms, r.ID)
 			m.mu.Unlock()
-			return nil, err
+			return nil, ErrInvalidInput
+		}
+	case "rental":
+		if len(p.RentalAgents) == 0 {
+			p.RentalAgents = []RentalAgent{{Name: p.RentalName, Skill: p.RentalSkill}}
+		}
+		if len(p.RentalAgents) > p.AgentCount || len(p.RentalAgents) > 5 {
+			m.mu.Lock()
+			delete(m.rooms, r.ID)
+			m.mu.Unlock()
+			return nil, ErrInvalidInput
+		}
+		for i := range p.RentalAgents {
+			var err error
+			p.RentalAgents[i].Name, p.RentalAgents[i].Skill, err = normalizeRentalProfile(p.RentalAgents[i].Name, p.RentalAgents[i].Skill)
+			if err != nil {
+				m.mu.Lock()
+				delete(m.rooms, r.ID)
+				m.mu.Unlock()
+				return nil, err
+			}
 		}
 		if err := m.checkRentalUsable(r, sess.UserID); err != nil {
 			m.mu.Lock()
 			delete(m.rooms, r.ID)
 			m.mu.Unlock()
 			return nil, err
+		}
+		if slots, ok := m.rentalDriver().(interface{ AvailableSlots() int }); ok && slots.AvailableSlots() < len(p.RentalAgents) {
+			m.mu.Lock()
+			delete(m.rooms, r.ID)
+			m.mu.Unlock()
+			return nil, errors.New("レンタルAIの空き枠が足りません。作成するAIの数を減らしてください")
 		}
 	default:
 		m.mu.Lock()
@@ -245,26 +283,34 @@ func (m *Manager) CreateRoom(sess *Session, p CreateParams) (*Room, error) {
 	r.mu.Lock()
 	member := &Member{UserID: sess.UserID, Name: p.UserName, IsHost: true, Joined: time.Now()}
 	r.Members[sess.UserID] = member
-	var rentalSeat *Seat
+	var rentalSeats []*Seat
 	switch {
 	case p.Mode == "spectate":
 	case p.AgentSource == "rental":
-		name, skill, _ := normalizeRentalProfile(p.RentalName, p.RentalSkill)
-		seat := m.addSeatLocked(r, member)
-		seat.Source = "rental"
-		seat.RentalName = name
-		seat.RentalSkill = skill
-		seat.RentalState = "preparing"
-		seat.InternalToken = genToken(24)
-		rentalSeat = seat
+		for i, agent := range p.RentalAgents {
+			var seat *Seat
+			if i == 0 {
+				seat = m.addSeatLocked(r, member)
+			} else {
+				seat = &Seat{ID: "s" + ulid.Make().String(), ManagedBy: sess.UserID, UserName: p.UserName, Token: genToken(24), KeyPhrase: genToken(6), Inbox: model.NewOwnerInbox(), Alive: true}
+				r.Seats = append(r.Seats, seat)
+				m.seatTokens.Store(seat.Token, seat)
+			}
+			seat.Source = "rental"
+			seat.RentalName = agent.Name
+			seat.RentalSkill = agent.Skill
+			seat.RentalState = "preparing"
+			seat.InternalToken = genToken(24)
+			rentalSeats = append(rentalSeats, seat)
+		}
 	case p.AgentSource == "" || p.AgentSource == "external":
 		m.addSeatLocked(r, member)
 	}
 	m.addPlaceholderSeatsLocked(r)
-	if rentalSeat != nil {
-		if err := m.attachRental(r, rentalSeat); err != nil {
-			rentalSeat.RentalState = "failed"
-			rentalSeat.RentalError = "レンタルAIを開始できませんでした"
+	for _, seat := range rentalSeats {
+		if err := m.attachRental(r, seat); err != nil {
+			seat.RentalState = "failed"
+			seat.RentalError = "レンタルAIを開始できませんでした"
 		}
 	}
 	r.mu.Unlock()
@@ -436,7 +482,7 @@ func (m *Manager) Join(r *Room, sess *Session, name, mode, agentSource, rentalNa
 // freeSeatLocked は r.mu 保持中に呼ぶ。
 func (r *Room) freeSeatLocked() *Seat {
 	for _, s := range r.Seats {
-		if s.UserID == "" && !s.Connected {
+		if s.UserID == "" && s.ManagedBy == "" && !s.Connected {
 			return s
 		}
 	}
@@ -549,12 +595,13 @@ func (m *Manager) checkRentalUsable(r *Room, userID string) error {
 		return ErrInvalidInput
 	}
 	if m.countRentalSeats(userID, r.ID) >= maxRentalPerUser {
-		return errors.New("レンタルAIの同時利用は1席までです")
+		return errors.New("レンタルAIを利用中のルームがすでにあります")
 	}
 	return nil
 }
 
-// countRentalSeats は指定ユーザーの稼働中・待機中レンタル席数を返す。
+// countRentalSeats は指定ユーザーが参加する稼働中・待機中レンタルルーム数を返す。
+// 作成者が管理する追加席は同じルームの利用として数える。
 func (m *Manager) countRentalSeats(userID, excludeRoomID string) int {
 	m.mu.Lock()
 	rooms := make([]*Room, 0, len(m.rooms))
@@ -632,8 +679,9 @@ func (m *Manager) updateRentalState(roomID, seatID, token, state, msg string) {
 	}
 }
 
-// UpdateRental は待機中のレンタル席の名前・SKILLを更新し、接続をやり直す。席所有者のみ。
-func (m *Manager) UpdateRental(r *Room, sess *Session, name, skill string) error {
+// UpdateRental は待機中のレンタル席の名前・SKILLを更新し、接続をやり直す。
+// seatIDが空なら本人の席を選び、追加席は管理する部屋主だけが変更できる。
+func (m *Manager) UpdateRental(r *Room, sess *Session, seatID, name, skill string) error {
 	if sess == nil {
 		return ErrNotAllowed
 	}
@@ -646,8 +694,18 @@ func (m *Manager) UpdateRental(r *Room, sess *Session, name, skill string) error
 	if r.Status != StatusWaiting {
 		return ErrAlreadyStarted
 	}
-	seat := r.seatByUser(sess.UserID)
-	if seat == nil || seat.Source != "rental" {
+	var seat *Seat
+	if seatID == "" {
+		seat = r.seatByUser(sess.UserID)
+	} else {
+		for _, candidate := range r.Seats {
+			if candidate.ID == seatID {
+				seat = candidate
+				break
+			}
+		}
+	}
+	if seat == nil || seat.Source != "rental" || (seat.UserID != sess.UserID && seat.ManagedBy != sess.UserID) {
 		return ErrSeatNotClaimable
 	}
 	seat.RentalName = name

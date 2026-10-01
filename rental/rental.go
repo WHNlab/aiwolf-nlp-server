@@ -92,6 +92,16 @@ func (m *Manager) Available() (bool, string) {
 	return true, ""
 }
 
+// AvailableSlots はルーム作成時にまとめて確保できる残り席数を返す。
+func (m *Manager) AvailableSlots() int {
+	if ok, _ := m.Available(); !ok {
+		return 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return maxWorkers - len(m.workers)
+}
+
 // Attach は席へ内部ワーカーを接続する。接続の成否はonStateで非同期に報告する。
 func (m *Manager) Attach(r *room.Room, seat *room.Seat, name, skill string, onState func(state, msg string)) error {
 	m.mu.Lock()

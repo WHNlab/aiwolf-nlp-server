@@ -62,6 +62,7 @@ const (
 type Seat struct {
 	ID        string
 	UserID    string // 席を予約した人間。観戦のみの部屋では空でもよい
+	ManagedBy string // 部屋主が追加したレンタル席。役職などの閲覧権は付与しない
 	UserName  string
 	Team      string // AIがNAME応答で名乗ったチーム名
 	Original  string
@@ -296,25 +297,28 @@ func (r *Room) Project(sess *Session) map[string]any {
 	seats := make([]map[string]any, 0, len(r.Seats))
 	for _, s := range r.sortedSeats() {
 		entry := map[string]any{
-			"seat_id":   s.ID,
-			"user_name": s.UserName,
-			"connected": s.Connected,
-			"claimed":   s.Claimed || (r.Status == StatusRunning && s.UserID != ""),
-			"alive":     s.Alive,
-			"agent_idx": s.AgentIdx,
-			"is_mine":   sess != nil && s.UserID == sess.UserID,
-			"source":    s.Source,
+			"seat_id":    s.ID,
+			"user_name":  s.UserName,
+			"connected":  s.Connected,
+			"claimed":    s.Claimed || (r.Status == StatusRunning && (s.UserID != "" || s.ManagedBy != "")),
+			"alive":      s.Alive,
+			"agent_idx":  s.AgentIdx,
+			"is_mine":    sess != nil && s.UserID == sess.UserID,
+			"is_managed": sess != nil && s.ManagedBy == sess.UserID,
+			"source":     s.Source,
 		}
 		if s.Source == "rental" {
 			entry["rental_name"] = s.RentalName
 			entry["rental_state"] = s.RentalState
 			// 夜の応答失敗から役職を推測できないよう、実行中の詳細は所有者にだけ返す。
-			if r.Status == StatusRunning && (sess == nil || s.UserID != sess.UserID) {
+			if (r.Status == StatusStarting || r.Status == StatusRunning) && (sess == nil || s.UserID != sess.UserID) {
 				entry["rental_state"] = "playing"
 			}
-			if sess != nil && s.UserID == sess.UserID {
+			if sess != nil && (s.UserID == sess.UserID || (r.Status == StatusWaiting && s.ManagedBy == sess.UserID)) {
 				entry["rental_skill"] = s.RentalSkill
 				entry["rental_error"] = s.RentalError
+			}
+			if sess != nil && s.UserID == sess.UserID {
 				// レンタルAIは外部エージェントがいないため、キーフレーズを所有者へ直接見せる。
 				entry["key_phrase"] = s.KeyPhrase
 			}

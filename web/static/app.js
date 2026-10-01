@@ -152,19 +152,11 @@ async function renderHome(revision) {
             </div>
           </div>
           <div id="rental-fields" class="rental-fields" ${rentalCaps.available ? '' : 'hidden'}>
-            <label class="field"><span class="field-label">Bot名（チーム名・6文字以内）</span>
-              <input type="text" name="rental_name" placeholder="例: シオン">
-              <small class="field-hint" id="create-rental-name-counter">0 / 6</small>
-            </label>
-            <div class="field"><span class="field-label">カスタムSKILL <small class="field-hint-inline">性格・話し方・戦い方の希望（任意）</small></span>
-              <textarea name="rental_skill" rows="3" maxlength="200" placeholder="例: 穏やかな口調で、発言の矛盾と投票先を重視してください。怪しい人にもまず質問し、根拠を短く説明してください。"></textarea>
-              <div class="skill-footer"><span class="skill-examples">
-                <button type="button" class="btn btn--tiny skill-example" data-skill="慎重に推理する口調で、根拠を述べてから結論を出します。焦って吊り先を決めず、矛盾点を質問で確かめます。">慎重派</button>
-                <button type="button" class="btn btn--tiny skill-example" data-skill="積極的に意見を出す口調で、怪しい人にははっきり投票します。率先して議論を引っ張ります。">積極派</button>
-                <button type="button" class="btn btn--tiny skill-example" data-skill="聞き役に回る口調で、他者の発言を整理して質問します。目立たないが、投票は筋を通します。">聞き役</button>
-              </span><span class="skill-counter" id="skill-counter">0 / 200</span></div>
-              <p class="field-hint">SKILLは性格や戦略の希望で、ルールを変えるものではありません。他の参加者にも見える可能性があるため、秘密の情報は書かないでください。</p>
-            </div>
+            <p class="field-hint">出場させるAIをまとめて設定できます。最初の1体だけがあなたのAI視点になり、ほかのAIの役職や個別メッセージは見えません。</p>
+            <div id="rental-agent-list" class="rental-agent-list"></div>
+            <button type="button" class="btn btn--small" id="add-rental-agent">＋ AIを追加</button>
+            <p class="field-hint" id="rental-agent-hint"></p>
+            <p class="field-hint">SKILLは性格や戦略の希望です。他の参加者にも見える可能性があるため、秘密の情報は書かないでください。</p>
           </div>
           <div class="field"><span class="field-label">公開設定</span>
             <div class="radio-cards">
@@ -229,6 +221,43 @@ async function renderHome(revision) {
   // レンタルAIの入力欄を選択時だけ開く。5人・ターン制以外では選べない。
   const createForm = $('#create-form');
   const skillLimit = rentalCaps.max_skill_length || 200;
+  const rentalList = $('#rental-agent-list');
+  const maxRentalAgents = Math.min(5, Number(rentalCaps.available_slots) || 1);
+  const addRentalAgent = () => {
+    const index = rentalList.children.length + 1;
+    if (index > maxRentalAgents) return;
+    rentalList.insertAdjacentHTML('beforeend', `<div class="rental-agent-card">
+      <div class="rental-agent-heading"><strong>AI ${index}${index === 1 ? ' · あなたの視点' : ''}</strong>${index > 1 ? '<button type="button" class="btn btn--tiny remove-rental-agent">削除</button>' : ''}</div>
+      <label class="field"><span class="field-label">Bot名（チーム名・6文字以内）</span><input type="text" data-rental-name placeholder="例: シオン"><small class="field-hint rental-name-counter">0 / 6</small></label>
+      <div class="field"><span class="field-label">カスタムSKILL <small class="field-hint-inline">性格・話し方・戦い方の希望（任意）</small></span>
+        <textarea data-rental-skill rows="3" maxlength="${skillLimit}" placeholder="例: 穏やかな口調で、発言の矛盾と投票先を重視してください。"></textarea>
+        <div class="skill-footer"><span class="skill-examples">
+          <button type="button" class="btn btn--tiny skill-example" data-skill="慎重に推理する口調で、根拠を述べてから結論を出します。焦って吊り先を決めず、矛盾点を質問で確かめます。">慎重派</button>
+          <button type="button" class="btn btn--tiny skill-example" data-skill="積極的に意見を出す口調で、怪しい人にははっきり投票します。率先して議論を引っ張ります。">積極派</button>
+          <button type="button" class="btn btn--tiny skill-example" data-skill="聞き役に回る口調で、他者の発言を整理して質問します。目立たないが、投票は筋を通します。">聞き役</button>
+        </span><span class="skill-counter">0 / ${skillLimit}</span></div>
+      </div></div>`);
+    const card = rentalList.lastElementChild;
+    const name = card.querySelector('[data-rental-name]');
+    const skill = card.querySelector('[data-rental-skill]');
+    bindRentalNameCounter(name, card.querySelector('.rental-name-counter'));
+    const syncSkill = () => { card.querySelector('.skill-counter').textContent = `${[...skill.value].length} / ${skillLimit}`; };
+    skill.addEventListener('input', syncSkill);
+    card.querySelectorAll('.skill-example').forEach(b => b.onclick = () => { skill.value = b.dataset.skill; syncSkill(); });
+    card.querySelector('.remove-rental-agent')?.addEventListener('click', () => { card.remove(); syncRentalCards(); });
+    syncRentalCards();
+  };
+  const syncRentalCards = () => {
+    [...rentalList.children].forEach((card, i) => {
+      card.querySelector('strong').textContent = `AI ${i + 1}${i === 0 ? ' · あなたの視点' : ''}`;
+      const remove = card.querySelector('.remove-rental-agent');
+      if (remove) remove.hidden = i === 0;
+    });
+    const count = rentalList.children.length;
+    const max = Math.min(maxRentalAgents, Number(createForm.agent_count.value || 5));
+    $('#add-rental-agent').disabled = count >= max;
+    $('#rental-agent-hint').textContent = `${count}体を作成 · 空席${Math.max(0, Number(createForm.agent_count.value || 5) - count)}席は友達のAIが参加できます（現在のレンタル空き枠: ${rentalCaps.available_slots ?? '—'}）`;
+  };
   const syncRentalFields = () => {
     const cnt = Number(createForm.agent_count.value || 5);
     const preset = presets.find(p => p.agent_count === cnt);
@@ -240,34 +269,28 @@ async function renderHome(revision) {
     }
     const show = radio && radio.checked;
     $('#rental-fields').hidden = !show;
-    createForm.rental_name.disabled = !show;
-    validateRentalName(createForm.rental_name, !!show);
-    if (show) createForm.rental_name.required = false;
+    rentalList.querySelectorAll('[data-rental-name], [data-rental-skill]').forEach(input => {
+      input.disabled = !show;
+      if (input.matches('[data-rental-name]')) validateRentalName(input, !!show);
+    });
+    syncRentalCards();
   };
-  const syncSkillCounter = () => {
-    const n = [...createForm.rental_skill.value].length;
-    $('#skill-counter').textContent = n + ' / ' + skillLimit;
-  };
+  addRentalAgent();
+  $('#add-rental-agent').onclick = addRentalAgent;
   createForm.addEventListener('change', syncRentalFields);
-  bindRentalNameCounter(createForm.rental_name, $('#create-rental-name-counter'));
-  createForm.rental_skill.addEventListener('input', syncSkillCounter);
-  createForm.querySelectorAll('.skill-example').forEach(b => b.onclick = () => {
-    createForm.rental_skill.value = b.dataset.skill;
-    syncSkillCounter();
-  });
   syncRentalFields();
-  syncSkillCounter();
   $('#create-form').onsubmit = async (e) => {
     e.preventDefault();
     const f = e.target;
     const err = $('#create-error');
     err.hidden = true;
-    if (f.mode.value === 'rental' && [...f.rental_skill.value].length > skillLimit) {
+    const rentalAgents = [...rentalList.children].map(card => ({ name: card.querySelector('[data-rental-name]').value, skill: card.querySelector('[data-rental-skill]').value }));
+    if (f.mode.value === 'rental' && rentalAgents.some(agent => [...agent.skill].length > skillLimit)) {
       err.textContent = 'カスタムSKILLは' + skillLimit + '文字以内で入力してください';
       err.hidden = false;
       return;
     }
-    if (f.mode.value === 'rental' && rentalNameLength(f.rental_name.value) > rentalNameLimit) {
+    if (f.mode.value === 'rental' && rentalAgents.some(agent => rentalNameLength(agent.name) > rentalNameLimit)) {
       err.textContent = 'Bot名（チーム名）は6文字以内で入力してください';
       err.hidden = false;
       return;
@@ -284,8 +307,7 @@ async function renderHome(revision) {
           agent_count: Number(f.agent_count.value || 5),
           mode: isRental ? 'participate' : f.mode.value,
           agent_source: isRental ? 'rental' : 'external',
-          rental_name: isRental ? f.rental_name.value : '',
-          rental_skill: isRental ? f.rental_skill.value : '',
+          rental_agents: isRental ? rentalAgents : [],
           is_public: f.is_public.value === 'true',
         }),
       });
@@ -451,9 +473,9 @@ function renderRoomView(data, hasNewEvents = false, previousRoom = null) {
   const mobileView = $('#room-grid')?.className || 'room-grid';
   const inviteOpen = $('#invite-detail') && !$('#invite-detail').hidden;
   const inviteText = $('#invite-text')?.value || '';
-  const rentalForm = $('#rental-edit-form');
-  const rentalValues = rentalForm?.dataset.roomId === data.room_id ? { name: rentalForm.rental_name.value, skill: rentalForm.rental_skill.value, open: rentalForm.closest('.rental-edit').open } : null;
-  const rentalFocus = rentalForm?.contains(document.activeElement) ? document.activeElement.name : '';
+  const rentalValues = new Map([...app.querySelectorAll('.rental-edit-form')].map(form => [form.dataset.seatId, { name: form.rental_name.value, skill: form.rental_skill.value, open: form.closest('.rental-edit').open }]));
+  const focusedRentalForm = document.activeElement?.closest('.rental-edit-form');
+  const rentalFocus = focusedRentalForm ? { seatId: focusedRentalForm.dataset.seatId, name: document.activeElement.name } : null;
   const rentalSelection = rentalFocus ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
   const consultText = $('#consult-form textarea')?.value || '';
   const focusedField = document.activeElement === $('#consult-form textarea') ? 'consult' : '';
@@ -487,17 +509,18 @@ function renderRoomView(data, hasNewEvents = false, previousRoom = null) {
     $('#invite-text').value = inviteText;
   }
   if ($('#consult-form textarea')) $('#consult-form textarea').value = consultText;
-  const nextRentalForm = $('#rental-edit-form');
-  if (nextRentalForm && rentalValues) {
-    nextRentalForm.rental_name.value = rentalValues.name;
-    nextRentalForm.rental_skill.value = rentalValues.skill;
-    nextRentalForm.closest('.rental-edit').open = rentalValues.open;
-    if (rentalFocus) {
-      const field = nextRentalForm.elements.namedItem(rentalFocus);
+  app.querySelectorAll('.rental-edit-form').forEach(form => {
+    const saved = rentalValues.get(form.dataset.seatId);
+    if (!saved) return;
+    form.rental_name.value = saved.name;
+    form.rental_skill.value = saved.skill;
+    form.closest('.rental-edit').open = saved.open;
+    if (rentalFocus?.seatId === form.dataset.seatId) {
+      const field = form.elements.namedItem(rentalFocus.name);
       field?.focus({ preventScroll: true });
       if (field && rentalSelection) field.setSelectionRange(...rentalSelection);
     }
-  }
+  });
   bindRoomEvents(data);
   if (focusedField) $('#consult-form textarea')?.focus({ preventScroll: true });
 }
@@ -517,7 +540,7 @@ function seatListHtml(data) {
     let sub = s.is_mine ? 'あなた' : (s.game_name || s.team_name || '');
     if (isRental) {
       const st = { preparing: 'AIの応答を確認中…', ready: '準備できました', playing: '参戦中', degraded: '代替行動中', finished: '終了', failed: '準備に失敗' }[s.rental_state] || s.rental_state || '状態確認中';
-      sub = 'レンタルAI · ' + st + (s.is_mine ? '（あなたのAI）' : '');
+      sub = 'レンタルAI · ' + st + (s.is_mine ? '（あなたのAI）' : s.is_managed ? '（作成したAI）' : '');
       if (!s.is_mine && s.user_name) sub = s.user_name + ' · ' + sub;
       if (s.is_mine && s.rental_error) sub += ' — ' + s.rental_error;
     } else if (s.connected && s.user_name) {
@@ -582,26 +605,32 @@ function rightPanelHtml(data) {
 function inviteHtml(data) {
   const mySeat = data.seats.find(s => s.is_mine);
   if (mySeat && mySeat.source === 'rental') {
-    const stLabel = { preparing: 'AIの応答を確認中…', ready: '準備できました', playing: '参戦中', degraded: '代替行動中', finished: '終了', failed: '準備に失敗' }[mySeat.rental_state] || mySeat.rental_state || '状態確認中';
+    const managedSeats = data.seats.filter(s => s.source === 'rental' && (s.is_mine || s.is_managed)).sort((a, b) => Number(b.is_mine) - Number(a.is_mine));
     return `<div class="paper panel invite-box">
-    <h3>レンタルAI</h3>
-    <p class="field-hint"><strong>${escapeHtml(mySeat.rental_name || 'レンタルAI')}</strong> — ${escapeHtml(stLabel)}${mySeat.rental_error ? '（' + escapeHtml(mySeat.rental_error) + '）' : ''}</p>
-    ${mySeat.rental_state === 'failed' ? '<p class="field-hint">原因を解消後、60秒ほど待って再試行してください。</p><button class="btn btn--small" id="btn-retry-rental" type="button">再試行</button>' : ''}
+    <h3>レンタルAI · ${managedSeats.length}体</h3>
+    <p class="field-hint">${managedSeats.length > 1 ? '最初のAIの視点だけが開きます。追加したAIの役職・個別メッセージは見えません。' : '準備が完了すると参加できます。'}</p>
+    ${managedSeats.map((seat, index) => {
+      const stLabel = { preparing: 'AIの応答を確認中…', ready: '準備できました', playing: '参戦中', degraded: '代替行動中', finished: '終了', failed: '準備に失敗' }[seat.rental_state] || seat.rental_state || '状態確認中';
+      return `<div class="rental-managed-seat" data-seat-id="${escapeHtml(seat.seat_id)}">
+        <strong>${index + 1}. ${escapeHtml(seat.rental_name || 'レンタルAI')}${seat.is_mine ? ' · あなたの視点' : ''}</strong>
+        <p class="field-hint">${escapeHtml(stLabel)}${seat.rental_error ? '（' + escapeHtml(seat.rental_error) + '）' : ''}</p>
+        ${seat.rental_state === 'failed' ? '<p class="field-hint">原因を解消後、60秒ほど待って再試行してください。</p><button class="btn btn--small retry-rental" type="button">再試行</button>' : ''}
+        <details class="rental-edit"><summary class="field-hint" style="cursor:pointer;font-weight:700">AIの設定を変更</summary>
+          <form class="rental-edit-form" data-seat-id="${escapeHtml(seat.seat_id)}" style="margin-top:8px">
+            <label class="field"><span class="field-label">Bot名（チーム名・6文字以内）</span>
+              <input type="text" name="rental_name" value="${escapeHtml(seat.rental_name || '')}">
+              <small class="field-hint rental-name-counter">${rentalNameLength(seat.rental_name || '')} / 6</small>
+            </label>
+            <div class="field"><span class="field-label">カスタムSKILL</span>
+              <textarea name="rental_skill" rows="3" maxlength="200">${escapeHtml(seat.rental_skill || '')}</textarea>
+              <div class="skill-footer"><span></span><span class="skill-counter">0 / 200</span></div>
+            </div>
+            <button class="btn btn--small" type="submit">保存して再接続</button>
+          </form>
+        </details>
+      </div>`;
+    }).join('')}
     <button class="btn btn--small" id="btn-share">🔗 観戦URLをコピー</button>
-    <details class="rental-edit" style="margin-top:10px"><summary class="field-hint" style="cursor:pointer;font-weight:700">AIの設定を変更</summary>
-      <form id="rental-edit-form" data-room-id="${escapeHtml(data.room_id)}" style="margin-top:8px">
-        <label class="field"><span class="field-label">Bot名（チーム名・6文字以内）</span>
-          <input type="text" name="rental_name" value="${escapeHtml(mySeat.rental_name || '')}">
-          <small class="field-hint" id="edit-rental-name-counter">${rentalNameLength(mySeat.rental_name || '')} / 6</small>
-        </label>
-        <div class="field"><span class="field-label">カスタムSKILL</span>
-          <textarea name="rental_skill" rows="3" maxlength="200">${escapeHtml(mySeat.rental_skill || '')}</textarea>
-          <div class="skill-footer"><span></span><span class="skill-counter" id="edit-skill-counter">0 / 200</span></div>
-        </div>
-        <button class="btn btn--small" type="submit">保存して再接続</button>
-        <p class="field-hint">開始前のみ変更できます。</p>
-      </form>
-    </details>
   </div>`;
   }
   return `<div class="paper panel invite-box">
@@ -711,27 +740,27 @@ function bindRoomEvents(data) {
   if (bcg) bcg.onclick = () => {
     copyTextarea($('#invite-text'), '案内をコピーしました');
   };
-  const mine = data.seats.find(s => s.is_mine && s.source === 'rental');
-  const rentalKey = `${data.room_id}:${mine?.seat_id || ''}`;
   const revision = routeRevision;
   const currentRoom = () => revision === routeRevision && state.room?.room_id === data.room_id;
-  const syncRentalPending = () => {
+  const syncRentalPending = (seatId) => {
     if (!currentRoom()) return;
-    const pending = rentalRetryPending.has(rentalKey);
-    const retry = $('#btn-retry-rental');
+    const pending = rentalRetryPending.has(`${data.room_id}:${seatId}`);
+    const box = [...app.querySelectorAll('.rental-managed-seat')].find(el => el.dataset.seatId === seatId);
+    const retry = box?.querySelector('.retry-rental');
     if (retry) {
       retry.disabled = pending;
       retry.textContent = pending ? '再試行中…' : '再試行';
     }
-    const submit = $('#rental-edit-form button[type="submit"]');
+    const submit = box?.querySelector('.rental-edit-form button[type="submit"]');
     if (submit) submit.disabled = pending;
   };
-  const updateRental = async (profile, message) => {
-    if (!mine || rentalRetryPending.has(rentalKey)) return;
+  const updateRental = async (seat, profile, message) => {
+    const rentalKey = `${data.room_id}:${seat.seat_id}`;
+    if (rentalRetryPending.has(rentalKey)) return;
     rentalRetryPending.add(rentalKey);
-    syncRentalPending();
+    syncRentalPending(seat.seat_id);
     try {
-      const out = await api(`/api/v1/rooms/${data.room_id}/rental`, { method: 'PUT', body: JSON.stringify(profile) });
+      const out = await api(`/api/v1/rooms/${data.room_id}/rentals/${encodeURIComponent(seat.seat_id)}`, { method: 'PUT', body: JSON.stringify(profile) });
       if (!currentRoom()) return;
       state.room = out;
       renderRoomView(out);
@@ -745,16 +774,15 @@ function bindRoomEvents(data) {
       } catch (_) { /* 次のSSE更新で表示を追いつかせる */ }
     } finally {
       rentalRetryPending.delete(rentalKey);
-      syncRentalPending();
+      syncRentalPending(seat.seat_id);
     }
   };
-  const retry = $('#btn-retry-rental');
-  if (retry) retry.onclick = () => updateRental({ rental_name: mine.rental_name || '', rental_skill: mine.rental_skill || '' }, 'レンタルAIを再試行しています');
-  const ef = $('#rental-edit-form');
-  if (ef) {
+  app.querySelectorAll('.rental-edit-form').forEach(ef => {
+    const seat = data.seats.find(s => s.seat_id === ef.dataset.seatId);
+    if (!seat) return;
     const skillLimit = rentalCaps.max_skill_length || 200;
-    bindRentalNameCounter(ef.rental_name, $('#edit-rental-name-counter'));
-    const ec = $('#edit-skill-counter');
+    bindRentalNameCounter(ef.rental_name, ef.querySelector('.rental-name-counter'));
+    const ec = ef.querySelector('.skill-counter');
     const syncEdit = () => { if (ec) ec.textContent = [...ef.rental_skill.value].length + ' / ' + skillLimit; };
     ef.rental_skill.addEventListener('input', syncEdit);
     syncEdit();
@@ -762,10 +790,12 @@ function bindRoomEvents(data) {
       e.preventDefault();
       if (rentalNameLength(ef.rental_name.value) > rentalNameLimit) { toast('Bot名（チーム名）は6文字以内で入力してください'); return; }
       if ([...ef.rental_skill.value].length > skillLimit) { toast('SKILLが長すぎます'); return; }
-      updateRental({ rental_name: ef.rental_name.value, rental_skill: ef.rental_skill.value }, 'AIの設定を更新しました');
+      updateRental(seat, { rental_name: ef.rental_name.value, rental_skill: ef.rental_skill.value }, 'AIの設定を更新しました');
     };
-  }
-  syncRentalPending();
+    const retry = ef.closest('.rental-managed-seat').querySelector('.retry-rental');
+    if (retry) retry.onclick = () => updateRental(seat, { rental_name: seat.rental_name || '', rental_skill: seat.rental_skill || '' }, 'レンタルAIを再試行しています');
+    syncRentalPending(seat.seat_id);
+  });
   document.querySelectorAll('.mobile-tabs .btn').forEach(b => {
     b.onclick = () => {
       const g = $('#room-grid');

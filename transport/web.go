@@ -83,6 +83,7 @@ func (s *Server) buildWebRouter() *gin.Engine {
 	rooms.POST("/:id/start", s.checkOrigin(), s.handleStartRoom)
 	rooms.POST("/:id/claim", s.checkOrigin(), s.handleClaimSeat)
 	rooms.PUT("/:id/rental", s.checkOrigin(), s.handleUpdateRental)
+	rooms.PUT("/:id/rentals/:seat_id", s.checkOrigin(), s.handleUpdateRental)
 	rooms.POST("/:id/consultations", s.checkOrigin(), s.handleSendAdvice)
 	rooms.GET("/:id/consultations", s.handleListConsultations)
 	rooms.GET("/:id/invite", s.handleAgentInvite)
@@ -238,14 +239,15 @@ func (s *Server) handleRoomPresets(c *gin.Context) {
 func (s *Server) handleCreateRoom(c *gin.Context) {
 	sess, fresh := s.session(c)
 	var body struct {
-		RoomName    string `json:"room_name"`
-		UserName    string `json:"user_name"`
-		AgentCount  int    `json:"agent_count"`
-		Mode        string `json:"mode"`
-		IsPublic    *bool  `json:"is_public"`
-		AgentSource string `json:"agent_source"`
-		RentalName  string `json:"rental_name"`
-		RentalSkill string `json:"rental_skill"`
+		RoomName     string             `json:"room_name"`
+		UserName     string             `json:"user_name"`
+		AgentCount   int                `json:"agent_count"`
+		Mode         string             `json:"mode"`
+		IsPublic     *bool              `json:"is_public"`
+		AgentSource  string             `json:"agent_source"`
+		RentalName   string             `json:"rental_name"`
+		RentalSkill  string             `json:"rental_skill"`
+		RentalAgents []room.RentalAgent `json:"rental_agents"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "不正なリクエストです"})
@@ -253,14 +255,15 @@ func (s *Server) handleCreateRoom(c *gin.Context) {
 	}
 	isPublic := body.IsPublic == nil || *body.IsPublic
 	r, err := s.roomManager.CreateRoom(sess, room.CreateParams{
-		RoomName:    body.RoomName,
-		UserName:    body.UserName,
-		AgentCount:  body.AgentCount,
-		Mode:        body.Mode,
-		Public:      isPublic,
-		AgentSource: body.AgentSource,
-		RentalName:  body.RentalName,
-		RentalSkill: body.RentalSkill,
+		RoomName:     body.RoomName,
+		UserName:     body.UserName,
+		AgentCount:   body.AgentCount,
+		Mode:         body.Mode,
+		Public:       isPublic,
+		AgentSource:  body.AgentSource,
+		RentalName:   body.RentalName,
+		RentalSkill:  body.RentalSkill,
+		RentalAgents: body.RentalAgents,
 	})
 	if err != nil {
 		jsonError(c, err)
@@ -528,7 +531,7 @@ func (s *Server) handleUpdateRental(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "不正なリクエストです"})
 		return
 	}
-	if err := s.roomManager.UpdateRental(r, sess, body.RentalName, body.RentalSkill); err != nil {
+	if err := s.roomManager.UpdateRental(r, sess, c.Param("seat_id"), body.RentalName, body.RentalSkill); err != nil {
 		jsonError(c, err)
 		return
 	}

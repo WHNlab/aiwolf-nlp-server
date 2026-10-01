@@ -46,7 +46,7 @@ curl -H "Authorization: Bearer <TOKEN>" http://127.0.0.1:8080/api/v1/games
 | --- | --- |
 | `GET /api/v1/room-presets` | 対応している人数・役職構成・通信方式の一覧 |
 | `GET /api/v1/rooms?status=active|finished&q=検索語` | 公開ルームの一覧。`active`（既定）は待機・開始中・進行中、`finished` は終了・中断した対戦記録。新しい順に最大50件 |
-| `POST /api/v1/rooms` | ルームを作成する (body: `room_name`, `user_name`, `agent_count`, `mode`, `is_public`, `agent_source`, `rental_name`, `rental_skill`。公開が既定) |
+| `POST /api/v1/rooms` | ルームを作成する (body: `room_name`, `user_name`, `agent_count`, `mode`, `is_public`, `agent_source`, `rental_agents: [{name, skill}]`。従来の `rental_name` / `rental_skill` も利用可。公開が既定) |
 | `POST /api/v1/rooms/{id}/join` | 入室する (body: `name`, `mode`, `agent_source`, `rental_name`, `rental_skill`。mode=participate なら席を確保) |
 | `POST /api/v1/rooms/{id}/leave` | 待機中に退室する |
 | `POST /api/v1/rooms/{id}/close` | ホストが部屋を閉じる |
@@ -59,7 +59,8 @@ curl -H "Authorization: Bearer <TOKEN>" http://127.0.0.1:8080/api/v1/games
 | `GET /api/v1/rooms/{id}/history?cursor=N` | 閲覧権限でフィルタしたイベント履歴 (seq > cursor) |
 | `GET /api/v1/rooms/{id}/events` | イベント配信 (SSE、更新通知 `room` と接続維持 `heartbeat`) |
 | `PUT /api/v1/rooms/{id}/rental` | 待機中の自分のレンタル席のAI名・カスタムSKILLを更新 (body: `rental_name`, `rental_skill`) |
-| `GET /api/v1/rental-capabilities` | レンタルAIの利用可否・対象人数・SKILL文字数上限・停止理由 |
+| `PUT /api/v1/rooms/{id}/rentals/{seat_id}` | 待機中の自分の席または自分が作成した追加レンタル席を更新・再接続 |
+| `GET /api/v1/rental-capabilities` | レンタルAIの利用可否・残り同時利用枠 (`available_slots`)・対象人数・SKILL文字数上限・停止理由 |
 
 `GET /api/v1/rooms/{id}` の `progress` は公開進行を返します。`phase` は `waiting`、`day_discussion`、`day_vote`、`night`、`finished` のいずれか、`revision` は進行状態の更新ごとに増加します。`active_public_turn` は昼のターン制公開 TALK 応答待ちだけに設定され、それ以外は `null` です。値には `turn_id`、`agent_idx`、`state: "waiting"`、`deadline_at: null` が含まれます。サーバが信頼できる期限を提供しないため、残り時間は投影しません。グループチャット方式と夜の行動者・秘密フェーズは単一の応答待ちとして公開しません。
 
@@ -200,12 +201,13 @@ data:{"id":"...","idx":1,"day":0,"is_day":true,"agents":[...],"event":"開始","
 
 運営のOpenAI APIキーで動くAIを席に参加させる機能です。利用者はAPIキー・CLI不要で、AIの名前と200文字までのカスタムSKILLをブラウザから入力します。
 
-- ルーム作成・入室で `agent_source: "rental"` を指定すると、自分の席がレンタルAIになります。レンタル席の招待APIは空を返し、接続トークンはサーバ内だけで扱います。
-- 初版は5人・ターン制のルームのみ対応し、1ユーザーあたり同時1席、全体で5席までです。
+- ルーム作成で `agent_source: "rental"` と `rental_agents: [{"name":"シオン","skill":"慎重に推理する"}, ...]` を指定すると、先頭が作成者自身の席になり、残りは作成者が設定する追加席になります。配列を省略した従来の単席指定、入室時の単席指定も利用できます。レンタル席の招待APIは空を返し、接続トークンはサーバ内だけで扱います。
+- 5人・ターン制のルームのみ対応し、1ルームで1〜5体、全体で同時5席までです。空席は友達が使用できます。利用者は同時に複数のレンタルルームを作成・参加できません。
+- 作成者が追加席の名前・SKILL・準備時のエラーを確認して再試行できるのは開始前だけです。試合中の追加席の役職・キーフレーズ・個別メッセージ・失敗理由は見えません。
 - 自分の席の視点は入室セッションで自動的に開きます。キーフレーズの入力は不要です。
 - `rental_name` はチーム名兼Bot名として1〜6文字（Unicodeコードポイント）で指定します。空欄は「レンタルAI」。前後の空白を除去し、制御文字と `Over` / `Skip` / `None` は拒否します。外部AIもNAME応答をBot名として扱います。試合中の名前・投票対象・保存記録に共通で使い、同名の場合は6文字以内で番号を付加します。
 - 会話は最新発言・履歴ともに全文を表示します。レンタルAIには発言ごとの上限・基本文字数・残り文字数から算出した生成上限を伝えます。超過時は収まる文末までを使い、一文も収まらなければ省略記号を付け、短縮したことを所有者のメモに表示します。過去の記録で既に切り捨てられた本文は復元しません。
-- 接続前にモデルが構造化応答を返せるか確認します（最大35秒、成功・失敗を60秒間共有）。失敗した席は `rental_state: "failed"` となり、準備人数には入りません。所有者にのみ `rental_error` を表示し、原因を解消後に同じ `PUT /api/v1/rooms/{id}/rental` で再試行できます。キャッシュ期間中は前回の結果を返します。
+- 接続前にモデルが構造化応答を返せるか確認します（最大35秒、成功・失敗を60秒間共有）。失敗した席は `rental_state: "failed"` となり、準備人数には入りません。準備中の `rental_error` は席の所有者、追加席は作成者にのみ表示し、原因を解消後に該当席の更新APIで再試行できます。キャッシュ期間中は前回の結果を返します。
 - 試合中も生成失敗の理由を `rental_error` に表示し、回復時にクリアします。利用枠不足・認証エラーなどは再試行せず `degraded` にします。一時的な429・5xxのみ待機後1回再試行し、連続3回の失敗・利用上限到達でも `degraded` としてその試合のAPI呼び出しを停止します。代替行動は発言終了と合法な対象の自動選択です。
 - 確認・再試行も予算に含めます。明示的な4xx拒否は生成費用に加算しません。利用量の読込・保存に失敗した場合は受付を停止します。
 - `OPENAI_API_KEY` が未設定、または日次予算 `AIWOLF_RENTAL_DAILY_USD` が未設定・0・到達の場合は利用不可として扱います。利用量は `AIWOLF_DATA_DIR`（既定 `./data`）の `rental-usage.json` に保存します。

@@ -297,7 +297,7 @@ func TestRoomWaitingDisconnect(t *testing.T) {
 	if _, _, err := conn.ReadMessage(); err != nil {
 		t.Fatal(err)
 	}
-	if err := conn.WriteMessage(websocket.TextMessage, []byte("test-agent")); err != nil {
+	if err := conn.WriteMessage(websocket.TextMessage, []byte("テストAI")); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(3 * time.Second)

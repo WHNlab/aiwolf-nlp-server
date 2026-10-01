@@ -46,7 +46,7 @@ When `server.web.enable` is `true`, a separate HTTP server for the Web UI (`serv
 | --- | --- |
 | `GET /api/v1/room-presets` | List of supported player counts, role compositions, and communication modes |
 | `GET /api/v1/rooms?status=active|finished&q=query` | List public rooms. `active` (default) includes waiting, starting, and running rooms; `finished` includes completed and aborted replays. Newest first, up to 50 |
-| `POST /api/v1/rooms` | Create a room (body: `room_name`, `user_name`, `agent_count`, `mode`, `is_public`, `agent_source`, `rental_name`, `rental_skill`; public by default) |
+| `POST /api/v1/rooms` | Create a room (body: `room_name`, `user_name`, `agent_count`, `mode`, `is_public`, `agent_source`, `rental_agents: [{name, skill}]`; legacy `rental_name` / `rental_skill` remain supported; public by default) |
 | `POST /api/v1/rooms/{id}/join` | Join a room (body: `name`, `mode`, `agent_source`, `rental_name`, `rental_skill`; mode=participate reserves a seat) |
 | `POST /api/v1/rooms/{id}/leave` | Leave while the room is waiting |
 | `POST /api/v1/rooms/{id}/close` | The host closes the room |
@@ -59,7 +59,8 @@ When `server.web.enable` is `true`, a separate HTTP server for the Web UI (`serv
 | `GET /api/v1/rooms/{id}/history?cursor=N` | Event history filtered by viewing permission (seq > cursor) |
 | `GET /api/v1/rooms/{id}/events` | Event stream (SSE, `room` update notices and `heartbeat` keepalives) |
 | `PUT /api/v1/rooms/{id}/rental` | Update your rental seat's AI name and custom skill while waiting (body: `rental_name`, `rental_skill`) |
-| `GET /api/v1/rental-capabilities` | Rental AI availability, supported player counts, skill length limit, and the user-facing reason when disabled |
+| `PUT /api/v1/rooms/{id}/rentals/{seat_id}` | Update or reconnect your own or an additional rental seat you created while waiting |
+| `GET /api/v1/rental-capabilities` | Rental AI availability, remaining concurrent capacity (`available_slots`), supported player counts, skill length limit, and the user-facing reason when disabled |
 
 The `progress` field in `GET /api/v1/rooms/{id}` contains public game progress. `phase` is one of `waiting`, `day_discussion`, `day_vote`, `night`, or `finished`; `revision` increments whenever progress changes. `active_public_turn` is set only while a sequential daytime public TALK response is pending and is `null` otherwise. Its value contains `turn_id`, `agent_idx`, `state: "waiting"`, and `deadline_at: null`. The server has no authoritative deadline to project. Freeform chat and night actors or secret subphases are not exposed as a single pending turn.
 
@@ -200,12 +201,13 @@ The public URL prefers `server.web_socket.public_url`; it is not inferred from t
 
 Seats can run an agent hosted by the server's OpenAI API key. Players only enter an AI name and a custom skill of up to 200 characters in the browser — no API key or CLI is needed.
 
-- Pass `agent_source: "rental"` when creating or joining a room to make your seat a rental agent. The invite endpoint returns nothing for rental seats; connection tokens stay inside the server.
-- The first version supports 5-player turn-based rooms only, one rental seat per user, and five concurrent workers in total.
+- When creating a room, pass `agent_source: "rental"` and `rental_agents: [{"name":"シオン","skill":"Reason carefully"}, ...]`. The first entry becomes the creator's own seat; the rest are additional seats configured by the creator. The legacy single-seat creation fields and single-seat join fields remain supported. The invite endpoint returns nothing for rental seats; connection tokens stay inside the server.
+- Only 5-player turn-based rooms are supported, with 1–5 rentals per room and five concurrent workers in total. Friends can occupy unreserved seats. A user cannot create or join multiple rental rooms concurrently.
+- The creator can inspect and retry setup failures for additional seats only before the match starts. Their roles, key phrases, private messages, and in-game failure details remain hidden during play.
 - The owner's seat perspective opens automatically using the room session; no key phrase entry is needed.
 - `rental_name` is the team/bot name and must contain 1–6 Unicode code points. Blank defaults to `レンタルAI`. Surrounding whitespace is trimmed; control characters and `Over`, `Skip`, and `None` are rejected. External agents also use their NAME response as their bot name. Names are shared across games, voting targets, and records; collisions receive a numeric suffix within six characters.
 - Both the latest speech and history display full text. Rental agents receive a generation limit calculated from the per-talk cap, base allowance, and remaining allowance. Oversized output is shortened at a complete sentence; if none fits, an ellipsis is added. The owner receives a note when speech is shortened. Text already discarded in historical records cannot be restored.
-- Before connecting, the server verifies that the model returns a structured response (up to 35 seconds, with success or failure shared for 60 seconds). Failed seats have `rental_state: "failed"` and do not count as ready. Only the owner receives `rental_error`. After resolving the cause, repeat `PUT /api/v1/rooms/{id}/rental` to retry; during the cache period it returns the previous result.
+- Before connecting, the server verifies that the model returns a structured response (up to 35 seconds, with success or failure shared for 60 seconds). Failed seats have `rental_state: "failed"` and do not count as ready. During setup, only the seat owner (or the room creator for an additional seat) receives `rental_error`. After resolving the cause, retry through that seat's update endpoint; during the cache period it returns the previous result.
 - Generation failures during games also populate `rental_error`, cleared on recovery. Quota, authentication, and other permanent errors immediately set `degraded` without retrying. Only transient 429/5xx responses get one delayed retry. Three consecutive failures or a usage limit also set `degraded` and stop API calls for that match. Fallbacks end speech and automatically choose a legal target.
 - Readiness checks and retries count toward budgets. Explicit 4xx rejections do not count as generation cost. Failure to read or persist usage stops new requests.
 - When `OPENAI_API_KEY` is unset, or the daily budget `AIWOLF_RENTAL_DAILY_USD` is unset, zero, or exhausted, the feature reports itself unavailable. Usage is stored in `rental-usage.json` under `AIWOLF_DATA_DIR` (default `./data`).
